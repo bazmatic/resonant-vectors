@@ -1,0 +1,27 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+
+# C extensions
+*.so
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+env/
+venv/
+.venv
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environment variables
+.env
+
+volumes/
