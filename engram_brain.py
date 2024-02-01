@@ -1,17 +1,19 @@
 from engram import Engram, EngramStore
 import numpy as np
-from settings import NOISE, MIN_RESULTS
+from settings import NOISE, MIN_RESULTS, FEEDBACK_BUFFER_SIZE
 
 # Generic brain that can be trained to make decisions based on input
 #
 
 class EngramBrain:
+
     def __init__(self, input_size: int, output_size: int, engram_store: EngramStore) -> None:
         self.input_size = input_size
         self.output_size = output_size
         self.engram_store = engram_store
         self.highest_score = 0.0
         self.lowest_score = 0.0
+        self.feedback_queue = []
         # if init_store:
         #     self.engram_store.init()
 
@@ -88,7 +90,25 @@ class EngramBrain:
         resonator = self.input_to_resonator(input)
         new_engram = Engram(vector=resonator, action=action, outcome=outcome)
         #print(f"New engram> action: {action}, outcome: {outcome}")
-        self.engram_store.insert(new_engram)
+        self.queue_feedback(new_engram, FEEDBACK_BUFFER_SIZE)
+
+    def queue_feedback(self, engram: Engram, queue_size) -> None:
+        # Add feedback to the queue
+        # Remove the first item in the queue and save to the collection
+        self.feedback_queue.append(engram)
+        if (len(self.feedback_queue) > queue_size):
+            # print(f"Saving engram to collection")
+            engram_to_save = self.feedback_queue.pop(0)
+            self.engram_store.insert(engram_to_save)
+
+    def flush_feedback_queue(self) -> None:
+        # Save all items in the queue to the collection
+        print("Flushing feedback queue")
+        for engram in self.feedback_queue:
+            self.engram_store.insert(engram)
+        self.feedback_queue = []
+        
+        
 
     
  

@@ -3,7 +3,7 @@ import gymnasium as gym
 from engram_brain import EngramBrain
 from engram import EngramStore
 import numpy
-from settings import READ_ONLY, DROP_COLLECTION, COLLECTION_NAME, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST
+from settings import READ_ONLY, DROP_COLLECTION, COLLECTION_NAME, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, ORIENTATION_BONUS
 
 class Trainer:
     # constructor
@@ -17,10 +17,10 @@ class Trainer:
     def reset(self):
         self.env.reset()
 
-    def trial(self):
+    def trial(self, time: float):
         # Run one trial
         self.trial_count += 1
-        print(f"Trial: {self.trial_count +1} ========================")
+        print(f"Trial: {self.trial_count +1} ({time}) ========================")
         self.env.reset()
 
         hit_points = HIT_POINTS
@@ -30,23 +30,55 @@ class Trainer:
         action_window = [0] * self.most_common_action_span
         reward_window = [0] * self.average_reward_span
         observation, _ = self.env.reset()
+
+        # Normalise the observation values, assuming the following ranges:
+        # 0: -1.5 to 1.5
+        # 1: -1.5 to 1.5
+        # 2: -5.0 to 5.0
+        # 3: -5.0 to 5.0
+        # 4: -3.1415927 to 3.1415927
+        # 5: -5.0 to 5.0
+        # 6: 0 to 0
+        # 7: 0 to 0
+
+        # Bonus reward, based on how close observation 4 is to 0
+        
+
+ 
+        observation = numpy.append(observation, time)
         quit = False
 
         for time_step in range(MAX_TRIAL_LENGTH):
+            
             brain_output = self.brain.decide(observation)
             normalised = [x - min(brain_output) for x in brain_output]
+
+            action = numpy.argmax(normalised)
             
-            output_sum = sum(normalised)
-            if output_sum == 0.0:
-                action = numpy.random.choice(numpy.arange(4))
-            else:
-                probabilities = [x / output_sum for x in normalised]
-                # Then choose one
-                action = numpy.random.choice(numpy.arange(4), p=probabilities)
+            # output_sum = sum(normalised)
+            # if output_sum == 0.0:
+            #     action = numpy.random.choice(numpy.arange(4))
+            # else:
+            #     probabilities = [x / output_sum for x in normalised]
+            #     # Then choose one
+            #     action = numpy.random.choice(numpy.arange(4), p=probabilities)
 
             observation, reward, terminated, truncated, info = self.env.step(action)
-            observation[6] = most_common_action
-            observation[7] = average_reward
+            observation[0] = observation[0] / 1.5
+            observation[1] = observation[1] / 1.5
+            observation[2] = observation[2] / 5.0
+            observation[3] = observation[3] / 5.0
+            observation[4] = observation[4] / 3.1415927
+            observation[5] = observation[5] / 5.0
+            observation[6] = 0
+            observation[7] = 0
+
+            bonus_reward = (abs(observation[4]))*ORIENTATION_BONUS
+            reward = reward + bonus_reward
+
+            # observation[6] = most_common_action
+            # observation[7] = average_reward
+            observation = numpy.append(observation, 0)
 
             total_reward = total_reward + reward
             # Normalise the reward into the range -1.0 to 1.0. Max reward is 200, min is -100
@@ -64,6 +96,8 @@ class Trainer:
             
             if READ_ONLY == False:
                 #print(f"Reward: {reward}")
+                # add time to observation array
+                
                 self.brain.apply_feedback(observation, action, reward)
 
             action_window.append(action)
@@ -87,9 +121,12 @@ class Trainer:
                 quit = True
 
             if quit:
-                print(f"*** Length of trial: {time_step}")
-                print(f"*** Total reward: {total_reward}")
-                return
+                break
+        # Only save the last few seconds if the lander is still alive
+        if hit_points > 0:
+            self.brain.flush_feedback_queue()
+        print(f"*** Length of trial: {time_step}")
+        print(f"*** Total reward: {total_reward}")
 
 
 def train():
@@ -99,12 +136,15 @@ def train():
     store = EngramStore(COLLECTION_NAME, DROP_COLLECTION)
 
     # Create the brain
-    brain = EngramBrain(8, 4, store)
+    brain = EngramBrain(9, 4, store)
 
     trainer = Trainer(env, brain)
 
-    for _ in range(10000000):
-        trainer.trial()
+    time = -1.0
+    for x in range(10000000):
+        #time += 0.00001
+        time = 0
+        trainer.trial(time)
 
     env.close()
 
