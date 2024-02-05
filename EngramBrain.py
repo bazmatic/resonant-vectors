@@ -15,17 +15,17 @@ class EngramBrain:
         self.resonator_factory = resonator_factory
 
     # Given an input, generate an output
-    def decide(self, input: np.ndarray) -> np.ndarray:
-        resonator = self.input_to_resonator(input)
+    def decide(self, input: np.ndarray, success: float) -> np.ndarray:
+        resonator = self.input_to_resonator(input, success)
         resonating_engrams = self.get_resonating_engrams(resonator, MIN_RESULTS)
         scored_ngrams = self.score_engrams(resonating_engrams)
         return self.make_output(input, scored_ngrams)
     
     # Given an input, generate a state vector used to look up engrams
-    def input_to_resonator(self, input: np.ndarray) -> np.ndarray:
+    def input_to_resonator(self, input: np.ndarray, success: float) -> np.ndarray:
         # A neural network could go here.
         # For now, just return the input
-        return self.resonator_factory.make_resonator(input)
+        return self.resonator_factory.make_resonator(input, success)
     
     # Query an EngramStore for resonating engrams
     def get_resonating_engrams(self, resonator: np.ndarray, MIN_RESULTS) -> list[Engram, float]:
@@ -68,9 +68,9 @@ class EngramBrain:
    
             return action_scores.tolist()                          
     
-    def apply_feedback(self, input: list[float], action: int, outcome: float) -> None:
+    def apply_feedback(self, input: list[float], action: int, outcome: float, success: float) -> None:
         # Given an input, output, and outcome, create a new engram and add it to the EngramStore
-        resonator = self.input_to_resonator(input)
+        resonator = self.input_to_resonator(input, success)
 
         #new_engram = Engram(vector=input, action=action, outcome=outcome)
         new_engram = Engram(vector=resonator, action=action, outcome=outcome)
