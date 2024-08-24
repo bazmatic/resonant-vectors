@@ -15,7 +15,7 @@ def run_breeder():
 
 def run_trainer():
     from Trainer import Trainer
-    trainer = Trainer("lander4", [1, 1, 1, 1, 1, 1, 1, 1], True)
+    trainer = Trainer("lander3", [1, 1, 1, 1, 1, 1, 1, 1], False)
     trainer.train(1000)
 
 run_trainer()
