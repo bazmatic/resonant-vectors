@@ -138,7 +138,7 @@ class EngramStore:
         
         # Query random sample by using a random vector and getting nearest
         import random
-        random_vector = [[random.uniform(-1, 1) for _ in range(9)]]
+        random_vector = [[random.uniform(-1, 1) for _ in range(STATE_VECTOR_SIZE)]]
         
         records = self.collection.search(
             data=random_vector,

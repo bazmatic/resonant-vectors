@@ -1,6 +1,6 @@
 # Resonant Vectors
 
-A reinforcement learning system that uses vector similarity search and memory-based decision making. The project implements an "EngramBrain" that stores experiences in a Milvus vector database and uses nearest-neighbor search to make decisions based on similar past experiences.
+A reinforcement learning system that uses vector similarity search and memory-based decision making. The project implements an "EngramBrain" that stores experiences in a vector database and uses nearest-neighbor search to make decisions based on similar past experiences.
 
 This project is testing the idea that something like Sheldrakes "morphic resonance", or a memory of nature, can explain the emergence of complex instinctive behaviours. Such behaviours cannot easily be explained through genetics. However, if animal behaviour is affected by the previous behavior of similar animals, then successful behaviours will tend to create more historical instances of that behaviour, making it easier to "resonate" with an animal in the present moment.
 
