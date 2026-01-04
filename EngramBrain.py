@@ -15,11 +15,21 @@ class EngramBrain:
         self.resonator_factory = resonator_factory
 
     # Given an input, generate an output
-    def decide(self, input: np.ndarray, success: float) -> np.ndarray:
+    def decide(self, input: np.ndarray, success: float, return_distance_info: bool = False):
         resonator = self.input_to_resonator(input, success)
         resonating_engrams = self.get_resonating_engrams(resonator, MIN_RESULTS)
         scored_ngrams = self.score_engrams(resonating_engrams)
-        return self.make_output(input, scored_ngrams)
+        output = self.make_output(input, scored_ngrams)
+        
+        if return_distance_info:
+            # Calculate average distance of retrieved engrams
+            if len(resonating_engrams) > 0:
+                avg_distance = sum(distance for _, distance in resonating_engrams) / len(resonating_engrams)
+            else:
+                avg_distance = float('inf')
+            return output, avg_distance
+        else:
+            return output
     
     # Given an input, generate a state vector used to look up engrams
     def input_to_resonator(self, input: np.ndarray, success: float) -> np.ndarray:

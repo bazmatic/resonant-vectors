@@ -6,6 +6,7 @@ from pymilvus import (
     Collection,
 )
 from settings import STATE_VECTOR_SIZE, OUTPUT_VECTOR_SIZE
+from typing import Dict
 
 class Engram:
     def __init__(
@@ -115,6 +116,51 @@ class EngramStore:
         for record in records[0]:
             result.append((Engram.from_record(record), record.distance))
         return result
+    
+    def get_count(self) -> int:
+        """Return the total number of engrams in the collection."""
+        self.collection.load()
+        return self.collection.num_entities
+    
+    def get_outcome_stats(self, sample_size: int = 1000) -> Dict[str, float]:
+        """
+        Sample engrams and return outcome distribution statistics.
+        Returns a dict with 'positive_ratio', 'negative_ratio', 'mean_outcome'.
+        """
+        self.collection.load()
+        total_count = self.collection.num_entities
+        
+        if total_count == 0:
+            return {'positive_ratio': 0.0, 'negative_ratio': 0.0, 'mean_outcome': 0.0}
+        
+        # Sample up to sample_size engrams
+        sample_limit = min(sample_size, total_count)
+        
+        # Query random sample by using a random vector and getting nearest
+        import random
+        random_vector = [[random.uniform(-1, 1) for _ in range(9)]]
+        
+        records = self.collection.search(
+            data=random_vector,
+            limit=sample_limit,
+            param={
+                "metric_type": "L2",
+                "params": {"nprobe": 16}
+            },
+            anns_field=EngramField.vector,
+            output_fields=["outcome"]
+        )
+        
+        outcomes = [record.fields["outcome"] for record in records[0]]
+        positive_count = sum(1 for o in outcomes if o > 0)
+        negative_count = sum(1 for o in outcomes if o < 0)
+        mean_outcome = sum(outcomes) / len(outcomes) if outcomes else 0.0
+        
+        return {
+            'positive_ratio': positive_count / len(outcomes) if outcomes else 0.0,
+            'negative_ratio': negative_count / len(outcomes) if outcomes else 0.0,
+            'mean_outcome': mean_outcome
+        }
 
    
 def test():
