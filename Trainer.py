@@ -4,9 +4,10 @@ from EngramBrain import EngramBrain
 from engram import EngramStore
 import numpy
 from WeightedResonatorFactory import WeightedResonatorFactory
-from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, PROBABILISTIC_CHOICE
+from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, PROBABILISTIC_CHOICE, SHOW_ACTION_OUTPUT
 import json
 from typing import Dict, List, Any
+import pygame
 
 class Trainer:
     # constructor
@@ -14,14 +15,16 @@ class Trainer:
         self.trial_count = 0
         self.clear_collection = clear_collection
         self.instance_name = instance_name
-        # Create the resonator factor and brain      
+        # Create the resonator factor and store
         self.resonator_factory = WeightedResonatorFactory(dimension_weights)
-        self.brain = EngramBrain(9, 4, EngramStore(instance_name, clear_collection), self.resonator_factory)
+        self.engram_store = EngramStore(instance_name, clear_collection)
+        # Create the brain
+        self.brain = EngramBrain(9, 4, self.engram_store, self.resonator_factory)
         if DISPLAY == True:
             render_mode = "human"
         else:
             render_mode = None
-        self.env = gym.make("LunarLander-v2", render_mode=render_mode)
+        self.env = gym.make("LunarLander-v3", render_mode=render_mode)
         self.feedback_queue = []
         self.best_success = -1.0
         self.mean_success = -1.0
@@ -31,6 +34,7 @@ class Trainer:
             'rewards': [],
             'episode_lengths': [],
             'successes': [],  # boolean list, reward >= 200
+            'deaths': [],  # boolean list, hit points ran out
             'engram_distances': [],  # average distance per episode
             'engram_counts': [],
             'action_distributions': [],  # list of dicts, one per episode
@@ -38,6 +42,27 @@ class Trainer:
             'rolling_average_50': [],
             'rolling_average_100': []
         }
+        
+        # Initialize pygame window for action output display if enabled
+        self.action_output_surface = None
+        self.action_output_background = None
+        self.action_output_clock = None
+        self.action_output_font = None
+        # Action labels: 0=Nothing, 1=Left, 2=Main, 3=Right
+        self.action_labels = ['N', 'L', 'M', 'R']
+        if DISPLAY == True and SHOW_ACTION_OUTPUT == True:
+            pygame.init()
+            # Window size: 200x50 for 4 squares (40x40 each with spacing)
+            window_width = 200
+            window_height = 50
+            # Use double buffering to reduce flicker
+            self.action_output_surface = pygame.display.set_mode((window_width, window_height), pygame.DOUBLEBUF)
+            pygame.display.set_caption("Action Output")
+            # Create a background surface to draw to
+            self.action_output_background = pygame.Surface((window_width, window_height))
+            # Initialize font for labels
+            self.action_output_font = pygame.font.Font(None, 36)
+            self.action_output_clock = pygame.time.Clock()
 
     def reset(self):
         self.env.reset()
@@ -65,6 +90,7 @@ class Trainer:
                 print(f"\n=== Progress Report (Trial {trial_num + 1}/{trials}) ===")
                 print(f"Overall Average Reward: {stats['overall_average_reward']:.2f}")
                 print(f"Success Rate: {stats['success_rate']:.1f}%")
+                print(f"Death Count: {stats['death_count']} ({stats['death_rate']:.1f}%)")
                 print(f"Best Episode Reward: {stats['best_episode_reward']:.2f}")
                 print(f"Rolling Average (last 50): {stats['current_rolling_average_50']:.2f}")
                 print(f"Rolling Average (last 100): {stats['current_rolling_average_100']:.2f}")
@@ -79,6 +105,11 @@ class Trainer:
                 print(f"Backup metrics saved to {backup_filename}\n")
 
         self.env.close()
+        
+        # Cleanup pygame window if it was created
+        if self.action_output_surface is not None:
+            pygame.quit()
+        
         result = total_reward / trials
         print(f">>>>>>> Average reward: {result}")
         return result
@@ -94,6 +125,7 @@ class Trainer:
         total_reward = 0.0
         observation, _ = self.env.reset()
         quit = False
+        death_occurred = False
         
         # Track metrics for this episode
         episode_actions = []
@@ -104,6 +136,10 @@ class Trainer:
             # Get brain output with distance info for metrics
             brain_output, distance = self.brain.decide(observation, self.mean_success + 0.05, return_distance_info=True)
             episode_distances.append(distance)
+            
+            # Draw action output if enabled
+            if DISPLAY == True and SHOW_ACTION_OUTPUT == True:
+                self._draw_action_output(brain_output)
             
             normalised = [x - min(brain_output) for x in brain_output]
 
@@ -137,7 +173,8 @@ class Trainer:
                 hit_points += reward
                 hit_points -= METABOLIC_COST
                 if hit_points < 0:
-                    print("** DEAD\n")
+                    print(f"** DEATH at step {time_step + 1}: Hit points exhausted (hit_points: {hit_points:.2f})\n")
+                    death_occurred = True
                     quit = True
 
             if terminated or truncated:
@@ -146,11 +183,24 @@ class Trainer:
             if quit:
                 break
         
-        self.flush_feedback(total_reward)
+        # Set reward to maximally negative value if death occurred
+        if death_occurred:
+            total_reward = -300.0
+        
+        # Calculate normalized success for trial metadata
+        normalized_success = total_reward
+        if normalized_success < -300:
+            normalized_success = -300
+        elif normalized_success > 300:
+            normalized_success = 300
+        normalized_success = normalized_success / 300
         
         # Record metrics for this episode
         episode_length = time_step + 1
         is_success = bool(total_reward >= 200)  # Ensure Python bool, not numpy bool
+        
+        # Pass trial metadata to flush_feedback so it can be stored with engrams
+        self.flush_feedback(total_reward, normalized_success, episode_length, is_success)
         # Filter out infinite distances before averaging
         valid_distances = [d for d in episode_distances if d != float('inf')]
         avg_distance = sum(valid_distances) / len(valid_distances) if valid_distances else float('inf')
@@ -167,6 +217,7 @@ class Trainer:
         self.metrics['rewards'].append(total_reward)
         self.metrics['episode_lengths'].append(episode_length)
         self.metrics['successes'].append(is_success)
+        self.metrics['deaths'].append(death_occurred)
         self.metrics['engram_distances'].append(avg_distance)
         self.metrics['engram_counts'].append(engram_count)
         self.metrics['action_distributions'].append(action_distribution)
@@ -190,6 +241,8 @@ class Trainer:
 
         print(f"*** Length of trial: {episode_length}")
         print(f"*** Total reward: {total_reward}")
+        if death_occurred:
+            print(f"*** DEATH: Hit points exhausted")
 
 
         return total_reward
@@ -201,6 +254,8 @@ class Trainer:
                 'total_trials': 0,
                 'overall_average_reward': 0.0,
                 'success_rate': 0.0,
+                'death_count': 0,
+                'death_rate': 0.0,
                 'best_episode_reward': -float('inf'),
                 'current_rolling_average_50': 0.0,
                 'current_rolling_average_100': 0.0,
@@ -213,6 +268,8 @@ class Trainer:
         overall_avg = sum(self.metrics['rewards']) / total_trials
         success_count = sum(self.metrics['successes'])
         success_rate = (success_count / total_trials) * 100.0 if total_trials > 0 else 0.0
+        death_count = sum(self.metrics['deaths'])
+        death_rate = (death_count / total_trials) * 100.0 if total_trials > 0 else 0.0
         
         current_rolling_50 = self.metrics['rolling_average_50'][-1] if self.metrics['rolling_average_50'] else 0.0
         current_rolling_100 = self.metrics['rolling_average_100'][-1] if self.metrics['rolling_average_100'] else 0.0
@@ -231,6 +288,8 @@ class Trainer:
             'total_trials': total_trials,
             'overall_average_reward': overall_avg,
             'success_rate': success_rate,
+            'death_count': death_count,
+            'death_rate': death_rate,
             'best_episode_reward': self.metrics['best_reward'],
             'current_rolling_average_50': current_rolling_50,
             'current_rolling_average_100': current_rolling_100,
@@ -268,6 +327,7 @@ class Trainer:
                 'rewards': self.metrics['rewards'],
                 'episode_lengths': self.metrics['episode_lengths'],
                 'successes': self.metrics['successes'],
+                'deaths': self.metrics['deaths'],
                 'engram_distances': self.metrics['engram_distances'],
                 'engram_counts': self.metrics['engram_counts'],
                 'action_distributions': self.metrics['action_distributions'],
@@ -288,15 +348,10 @@ class Trainer:
     def queue_feedback(self, observation: list[float], action: int, reward: float):
         self.feedback_queue.append((observation, action, reward))
     
-    def flush_feedback(self, success: float):
+    def flush_feedback(self, total_reward: float, normalized_success: float, episode_length: int, is_success: bool):
         if READ_ONLY == False:
-       
-            # Normalise success from -200 to 200 to -1 to 1
-            if success < -300:
-                success = -300
-            elif success > 300:
-                success = 300          
-            success = success / 300
+            # Use normalized_success (already normalized)
+            success = normalized_success
             if success > self.best_success:
                 self.best_success = success
             
@@ -308,15 +363,106 @@ class Trainer:
                     self.mean_success = (self.mean_success * (self.trial_count - 1) + success) / self.trial_count
                 else:
                     self.mean_success = (self.mean_success * 19 + success) / 20
-            #self.mean_success = (self.mean_success * (self.trial_count - 1) + success) / self.trial_count
 
             print(f"SUCCESS: {success}")
             print(f"MEAN SUCCESS: {self.mean_success}")
 
-             # For each engram in the queue
+            # For each engram in the queue, pass trial metadata
             for observation, action, reward in self.feedback_queue:
-                self.brain.apply_feedback(observation, action, reward, success)
+                self.brain.apply_feedback(observation, action, reward, success, self.trial_count,
+                                        normalized_success, total_reward, episode_length, is_success)
             self.feedback_queue.clear()
+    
+    def _value_to_color(self, value: float) -> tuple[int, int, int]:
+        """
+        Map a value in the range [-1, 1] to an RGB color.
+        -1 = red (255, 0, 0)
+        0 = yellow (255, 255, 0)
+        +1 = green (0, 255, 0)
+        """
+        # Clamp value to [-1, 1]
+        value = max(-1.0, min(1.0, value))
+        
+        if value <= 0:
+            # Interpolate from red to yellow (value goes from -1 to 0)
+            # When value = -1, we want red (255, 0, 0)
+            # When value = 0, we want yellow (255, 255, 0)
+            t = (value + 1.0)  # Maps -1->0 to 0->1
+            r = 255
+            g = int(255 * t)
+            b = 0
+        else:
+            # Interpolate from yellow to green (value goes from 0 to 1)
+            # When value = 0, we want yellow (255, 255, 0)
+            # When value = 1, we want green (0, 255, 0)
+            t = value  # Maps 0->1 to 0->1
+            r = int(255 * (1.0 - t))
+            g = 255
+            b = 0
+        
+        return (r, g, b)
+    
+    def _draw_action_output(self, brain_output: list[float]) -> None:
+        """
+        Draw action output values as colored squares in the pygame window.
+        Normalizes values to [-1, 1] range using min-max normalization.
+        """
+        if self.action_output_surface is None or self.action_output_background is None:
+            return
+        
+        # Normalize brain_output values to [-1, 1] range
+        if len(brain_output) == 0:
+            return
+        
+        min_val = min(brain_output)
+        max_val = max(brain_output)
+        
+        if max_val == min_val:
+            # All values are the same, set all to 0 (yellow)
+            normalized_values = [0.0] * len(brain_output)
+        else:
+            # Min-max normalization to [-1, 1]
+            normalized_values = [2.0 * (val - min_val) / (max_val - min_val) - 1.0 for val in brain_output]
+        
+        # Clear the background surface with black
+        self.action_output_background.fill((0, 0, 0))
+        
+        # Draw squares for each action on the background surface
+        square_size = 40
+        spacing = 10
+        start_x = spacing
+        start_y = 5
+        
+        for i, normalized_value in enumerate(normalized_values):
+            color = self._value_to_color(normalized_value)
+            x = start_x + i * (square_size + spacing)
+            y = start_y
+            pygame.draw.rect(self.action_output_background, color, (x, y, square_size, square_size))
+            
+            # Draw label on the square
+            if self.action_output_font is not None and i < len(self.action_labels):
+                label_text = self.action_labels[i]
+                # Use white text for visibility on colored backgrounds
+                text_surface = self.action_output_font.render(label_text, True, (255, 255, 255))
+                # Center the text in the square
+                text_x = x + (square_size - text_surface.get_width()) // 2
+                text_y = y + (square_size - text_surface.get_height()) // 2
+                self.action_output_background.blit(text_surface, (text_x, text_y))
+        
+        # Blit the background surface to the display surface
+        self.action_output_surface.blit(self.action_output_background, (0, 0))
+        
+        # Update the display using flip() for double buffering
+        pygame.display.flip()
+        
+        # Limit frame rate to reduce flickering (30 FPS should be smooth)
+        if self.action_output_clock is not None:
+            self.action_output_clock.tick(30)
+        
+        # Handle pygame events to keep window responsive
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pass  # Don't quit, just ignore
 
 
 def normalise_observation(observation: list[float]) -> list[float]:
