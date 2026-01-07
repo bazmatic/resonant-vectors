@@ -4,19 +4,20 @@ from EngramBrain import EngramBrain
 from engram import EngramStore
 import numpy
 from WeightedResonatorFactory import WeightedResonatorFactory
-from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, PROBABILISTIC_CHOICE, SHOW_ACTION_OUTPUT
+import settings
+from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, PROBABILISTIC_CHOICE, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS
 import json
 from typing import Dict, List, Any
 import pygame
 
 class Trainer:
     # constructor
-    def __init__(self, instance_name: str, dimension_weights: list[float], clear_collection: bool = True):
+    def __init__(self, instance_name: str, clear_collection: bool = True):
         self.trial_count = 0
         self.clear_collection = clear_collection
         self.instance_name = instance_name
         # Create the resonator factor and store
-        self.resonator_factory = WeightedResonatorFactory(dimension_weights)
+        self.resonator_factory = WeightedResonatorFactory(weights=VECTOR_COMPONENT_WEIGHTS)
         self.engram_store = EngramStore(instance_name, clear_collection)
         # Create the brain
         self.brain = EngramBrain(9, 4, self.engram_store, self.resonator_factory)
@@ -133,8 +134,14 @@ class Trainer:
 
         for time_step in range(MAX_TRIAL_LENGTH):
             
+            # Calculate panic factor based on current hit points (if panic is enabled)
+            panic_factor = 0.0
+            if USE_HIT_POINTS == True and PANIC_ENABLED == True:
+                # Calculate panic factor: 0.0 at full hit points, 1.0 at zero hit points
+                panic_factor = max(0.0, min(1.0, 1.0 - (hit_points / HIT_POINTS)))
+            
             # Get brain output with distance info for metrics
-            brain_output, distance = self.brain.decide(observation, self.mean_success + 0.05, return_distance_info=True)
+            brain_output, distance = self.brain.decide(observation, self.mean_success + 0.05, return_distance_info=True, panic_factor=panic_factor)
             episode_distances.append(distance)
             
             # Draw action output if enabled
@@ -318,9 +325,37 @@ class Trainer:
         # Get outcome stats from engram store
         outcome_stats = self.brain.engram_store.get_outcome_stats()
         
+        # Collect all settings from settings module
+        settings_dict = {
+            'STATE_VECTOR_SIZE': settings.STATE_VECTOR_SIZE,
+            'OUTPUT_VECTOR_SIZE': settings.OUTPUT_VECTOR_SIZE,
+            'NOISE': settings.NOISE,
+            'MIN_RESULTS': settings.MIN_RESULTS,
+            'READ_ONLY': settings.READ_ONLY,
+            'DROP_COLLECTION': settings.DROP_COLLECTION,
+            'USE_HIT_POINTS': settings.USE_HIT_POINTS,
+            'HIT_POINTS': settings.HIT_POINTS,
+            'MAX_TRIAL_LENGTH': settings.MAX_TRIAL_LENGTH,
+            'METABOLIC_COST': settings.METABOLIC_COST,
+            'PANIC_ENABLED': settings.PANIC_ENABLED,
+            'PANIC_MAX_NOISE': settings.PANIC_MAX_NOISE,
+            'PROBABILISTIC_CHOICE': settings.PROBABILISTIC_CHOICE,
+            'DISPLAY': settings.DISPLAY,
+            'SHOW_ACTION_OUTPUT': settings.SHOW_ACTION_OUTPUT,
+            'DECAY_ENABLED': settings.DECAY_ENABLED,
+            'DECAY_FUNCTION': settings.DECAY_FUNCTION,
+            'DECAY_OFFSET_IDS': settings.DECAY_OFFSET_IDS,
+            'DECAY_SCALE_IDS': settings.DECAY_SCALE_IDS,
+            'DECAY_VALUE': settings.DECAY_VALUE,
+            'TRIAL_SUCCESS_MULTIPLIER_SCALE': settings.TRIAL_SUCCESS_MULTIPLIER_SCALE,
+            'VECTOR_COMPONENT_WEIGHTS': settings.VECTOR_COMPONENT_WEIGHTS,
+            'VECTOR_SAVE_RATE': settings.VECTOR_SAVE_RATE
+        }
+        
         # Prepare data for export
         export_data = {
             'instance_name': self.instance_name,
+            'settings': settings_dict,
             'summary_stats': self.get_summary_stats(),
             'outcome_stats': outcome_stats,
             'metrics': {
@@ -364,13 +399,19 @@ class Trainer:
                 else:
                     self.mean_success = (self.mean_success * 19 + success) / 20
 
-            print(f"SUCCESS: {success}")
-            print(f"MEAN SUCCESS: {self.mean_success}")
+            # print(f"SUCCESS: {success}")
+            # print(f"MEAN SUCCESS: {self.mean_success}")
 
-            # For each engram in the queue, pass trial metadata
-            for observation, action, reward in self.feedback_queue:
-                self.brain.apply_feedback(observation, action, reward, success, self.trial_count,
-                                        normalized_success, total_reward, episode_length, is_success)
+            # Batch insert all engrams from the queue for better performance
+            if len(self.feedback_queue) > 0:
+                observations, actions, rewards = zip(*self.feedback_queue)
+                self.brain.batch_apply_feedback(
+                    list(observations), 
+                    list(actions), 
+                    list(rewards), 
+                    success, 
+                    normalized_success
+                )
             self.feedback_queue.clear()
     
     def _value_to_color(self, value: float) -> tuple[int, int, int]:
@@ -466,12 +507,18 @@ class Trainer:
 
 
 def normalise_observation(observation: list[float]) -> list[float]:
-    observation[0] = observation[0] / 1.5
-    observation[1] = observation[1] / 1.5
-    observation[2] = observation[2] / 5.0
-    observation[3] = observation[3] / 5.0
-    observation[4] = observation[4] / 3.1415927
-    observation[5] = observation[5] / 5.0
-    observation[6] = 0
-    observation[7] = 0
+    # Normalize all components to [-1, 1] range with proper scaling and clamping
+    # Position (x, y): divide by 2.5 (max absolute value: ±2.5)
+    observation[0] = max(-1.0, min(1.0, observation[0] / 2.5))
+    observation[1] = max(-1.0, min(1.0, observation[1] / 2.5))
+    # Velocities (vx, vy): divide by 10 (max absolute value: ±10)
+    observation[2] = max(-1.0, min(1.0, observation[2] / 10.0))
+    observation[3] = max(-1.0, min(1.0, observation[3] / 10.0))
+    # Angle: divide by π (max absolute value: ±π)
+    observation[4] = max(-1.0, min(1.0, observation[4] / 3.1415927))
+    # Angular velocity: divide by 10 (max absolute value: ±10)
+    observation[5] = max(-1.0, min(1.0, observation[5] / 10.0))
+    # Leg contact booleans: map 0→-1, 1→1
+    observation[6] = -1.0 if observation[6] == 0.0 else 1.0
+    observation[7] = -1.0 if observation[7] == 0.0 else 1.0
     return observation

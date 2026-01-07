@@ -25,3 +25,5 @@ venv/
 .env
 
 volumes/
+*.png
+experiments/

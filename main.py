@@ -1,24 +1,13 @@
-from Breeder import Breeder
-
-
-def run_breeder():
-    breeder = Breeder(population_size=10, genome_size=8)
-
-    GENERATIONS = 5
-    for generation in range(GENERATIONS):
-        print(f"### GENERATION {generation}")
-        breeder.run()
-
-    # Print the best genome
-    print(breeder.best_genome)
-
-
 def run_trainer():
     import signal
     import sys
     from Trainer import Trainer
+    from settings import TRIALS_PER_EXPERIMENT
     
-    trainer = Trainer("lander3", [1, 1, 1, 1, 1, 1, 1, 1], clear_collection=True)
+    # Check for --no-clear flag
+    clear_collection = "--no-clear" not in sys.argv
+    
+    trainer = Trainer("lander3", clear_collection=clear_collection)
     
     # Handle Ctrl+C gracefully - save metrics before exiting
     def signal_handler(sig, frame):
@@ -33,7 +22,7 @@ def run_trainer():
     try:
         # Run for 1000 trials with reporting every 100 trials
         # Metrics are automatically saved every 100 trials as backup
-        trainer.train(1000, report_interval=100, save_interval=100)
+        trainer.train(TRIALS_PER_EXPERIMENT, report_interval=100, save_interval=100)
         
         # Save metrics at the end
         trainer.save_metrics("training_metrics.json")

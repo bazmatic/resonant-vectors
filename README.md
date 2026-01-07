@@ -21,13 +21,12 @@ The system is trained on the LunarLander-v2 environment from Gymnasium, learning
 - **`EngramBrain`**: The decision-making engine that queries similar experiences and generates actions
 - **`EngramStore`**: Manages storage and retrieval of engrams in Milvus
 - **`Trainer`**: Orchestrates training on Gymnasium environments
-- **`Breeder`**: Genetic algorithm for evolving resonator dimension weights
-- **`WeightedResonatorFactory`**: Converts input states to resonator vectors using learned weights
+- **`WeightedResonatorFactory`**: Converts input states to resonator vectors
 
 ### How It Works
 
 1. **Observation**: The agent receives a state observation from the environment
-2. **Resonator Creation**: The state is converted to a resonator vector (with optional dimension weighting)
+2. **Resonator Creation**: The state is converted to a resonator vector
 3. **Similarity Search**: Milvus finds the nearest engrams to the resonator vector
 4. **Action Selection**: Actions are scored based on similar past experiences and their outcomes
 5. **Learning**: After each trial, new engrams are created and stored with their outcomes
@@ -85,27 +84,13 @@ Train an agent with default settings:
 ```python
 from Trainer import Trainer
 
-trainer = Trainer("lander3", [1, 1, 1, 1, 1, 1, 1, 1], clear_collection=True)
+trainer = Trainer("lander3", clear_collection=True)
 trainer.train(1000)  # Run 1000 trials
 ```
 
 Parameters:
 - `instance_name`: Unique name for the Milvus collection
-- `dimension_weights`: Weights for each state dimension (8 values for LunarLander)
 - `clear_collection`: Whether to reset the collection before training
-
-### Genetic Algorithm Breeding
-
-Evolve optimal dimension weights using the Breeder:
-
-```python
-from Breeder import Breeder
-
-breeder = Breeder(population_size=10, genome_size=8)
-breeder.run()  # Run one generation
-```
-
-The `Breeder` evaluates each genome by training a `Trainer` and selects the best performers for breeding.
 
 ### Running the Main Script
 
@@ -115,7 +100,7 @@ The `main.py` file contains example usage:
 python main.py
 ```
 
-Currently configured to run the trainer, but can be modified to run the breeder instead.
+Currently configured to run the trainer.
 
 ## Configuration
 
@@ -140,7 +125,6 @@ Edit `settings.py` to customize behavior:
 ├── EngramBrain.py             # Core decision-making system
 ├── engram.py                  # Engram data structure and Milvus store
 ├── Trainer.py                 # Training orchestration
-├── Breeder.py                 # Genetic algorithm for hyperparameter evolution
 ├── WeightedResonatorFactory.py # State-to-resonator conversion
 ├── IResonatorFactory.py       # Interface for resonator factories
 ├── settings.py                # Configuration parameters
@@ -163,7 +147,7 @@ An **engram** represents a memory trace containing:
 
 ### Resonators
 
-A **resonator** is a transformed version of the input state, optimized for similarity matching. The `WeightedResonatorFactory` applies learned weights to different state dimensions and appends success metrics.
+A **resonator** is a transformed version of the input state, optimized for similarity matching. The `WeightedResonatorFactory` appends success metrics to the state vector.
 
 ### Similarity Search
 

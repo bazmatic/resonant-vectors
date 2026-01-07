@@ -1,6 +1,6 @@
 from engram import Engram, EngramStore
 import numpy as np
-from settings import NOISE, MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE
+from settings import NOISE, MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, PANIC_MAX_NOISE
 from IResonatorFactory import IResonatorFactory
 from typing import List, Tuple
 
@@ -16,11 +16,11 @@ class EngramBrain:
         self.resonator_factory = resonator_factory
 
     # Given an input, generate an output
-    def decide(self, input: np.ndarray, success: float, return_distance_info: bool = False):
+    def decide(self, input: np.ndarray, success: float, return_distance_info: bool = False, panic_factor: float = 0.0):
         resonator = self.input_to_resonator(input, success)
         resonating_engrams = self.get_resonating_engrams(resonator, MIN_RESULTS)
         scored_ngrams = self.score_engrams(resonating_engrams)
-        output = self.make_output(input, scored_ngrams)
+        output = self.make_output(input, scored_ngrams, panic_factor)
         
         if return_distance_info:
             # Calculate average distance of retrieved engrams
@@ -44,62 +44,102 @@ class EngramBrain:
         return results
           
     # Assign a score to the Engrams
-    def score_engrams(self, resonating_engrams: List[Tuple[Engram, float]]) -> List[Tuple[Engram, float]]:
+    def score_engrams(self, resonating_engrams: List[Tuple[Engram, float]]) -> List[Tuple[Engram, float, float]]:
         # For each engram, calculate a score by multiplying the engram's outcome by the trial success multiplier.
-        # Return an array of engrams and their scores, sorted by score.    
+        # Return an array of (engram, score, distance) tuples, sorted by score.
+        # Distance is preserved for distance-based weighting in make_output.
         result = []
         for engram, distance in resonating_engrams:
             score = engram.outcome
             
             # Apply trial success multiplier if trial metadata is available
-            if engram.trial_number > 0 and hasattr(engram, 'trial_final_success'):
+            if hasattr(engram, 'trial_final_success') and engram.trial_final_success != 0.0:
                 multiplier = 1.0 + (engram.trial_final_success * TRIAL_SUCCESS_MULTIPLIER_SCALE)
                 score = score * multiplier
             
-            result.append((engram, score))
+            result.append((engram, score, distance))
             
         result.sort(key=lambda x: x[1], reverse=True)   
         return result
     
-    def make_output(self, input: list[float], scored_engrams: list[Engram, float]) -> list[float]:
+    def make_output(self, input: list[float], scored_engrams: list[tuple], panic_factor: float = 0.0) -> list[float]:
         # Return a vector of length output_size (Engram.action)
         # Different algorithms could go here, such as a neural network, which could take into account the scary low-scoring engrams too.
+        # Scores are weighted by distance: closer engrams have more influence.
 
-
-        scored_engrams = [(engram, score) for engram, score in scored_engrams]
         if len(scored_engrams) == 0:
             return np.random.random(self.output_size)
         else:
             # Create a weighting for each action
-            # This is the average score of the engrams that suggest it
-            # First get the count and total score for each action
-            action_scores = np.zeros(self.output_size)
-            action_counts = np.zeros(self.output_size)
-            for engram, score in scored_engrams:
-                action_scores[int(engram.action)] = action_scores[int(engram.action)] + score
-                action_counts[int(engram.action)] += 1
+            # Scores are weighted by distance: weight = 1 / (1 + distance)
+            # This gives closer engrams (smaller distance) more influence
+            action_weighted_scores = np.zeros(self.output_size)
+            action_total_weights = np.zeros(self.output_size)
+            
+            for item in scored_engrams:
+                # Handle both old format (engram, score) and new format (engram, score, distance)
+                if len(item) == 3:
+                    engram, score, distance = item
+                    # Weight by inverse distance: closer = higher weight
+                    # Using 1 / (1 + distance) to prevent division by zero and ensure positive weights
+                    weight = 1.0 / (1.0 + distance)
+                else:
+                    # Backward compatibility: if distance not provided, use weight of 1.0
+                    engram, score = item
+                    weight = 1.0
+                
+                action_idx = int(engram.action)
+                action_weighted_scores[action_idx] += score * weight
+                action_total_weights[action_idx] += weight
 
-            # Now average them, handling the case where there are no results for an action
-            action_scores = np.divide(action_scores, action_counts, out=np.zeros_like(action_scores), where=action_counts!=0)
+            # Calculate weighted average: sum(score * weight) / sum(weight)
+            # Handle the case where there are no results for an action
+            action_scores = np.divide(
+                action_weighted_scores, 
+                action_total_weights, 
+                out=np.zeros_like(action_weighted_scores), 
+                where=action_total_weights!=0
+            )
 
-            # Apply noise
-            noise = NOISE
+            # Calculate dynamic noise based on panic factor (exponential scaling)
+            if panic_factor > 0.0:
+                # Exponential scaling: noise = NOISE * (PANIC_MAX_NOISE / NOISE) ** panic_factor
+                noise = NOISE * (PANIC_MAX_NOISE / NOISE) ** panic_factor
+            else:
+                noise = NOISE
+            
             action_scores = action_scores + np.random.normal(0, noise, self.output_size)
 
             return action_scores.tolist()                          
     
     def apply_feedback(self, input: list[float], action: int, outcome: float, success: float, 
-                      trial_number: int = 0, trial_final_success: float = 0.0, 
-                      trial_raw_reward: float = 0.0, trial_episode_length: int = 0, 
-                      trial_is_success: bool = False) -> None:
+                      trial_final_success: float = 0.0) -> None:
         # Given an input, output, and outcome, create a new engram and add it to the EngramStore
-        resonator = self.input_to_resonator(input, success)
-
-        #new_engram = Engram(vector=input, action=action, outcome=outcome)
-        new_engram = Engram(vector=resonator, action=action, outcome=outcome)
-        self.engram_store.insert(new_engram, trial_number, trial_final_success, 
-                                trial_raw_reward, trial_episode_length, trial_is_success)
-        #self.engram_store.insert(resonator)
+        # Store only the input state vector (not the resonator with success)
+        # Success is stored separately in trial_final_success field for scoring purposes
+        new_engram = Engram(vector=input, action=action, outcome=outcome)
+        self.engram_store.insert(new_engram, trial_final_success)
+    
+    def batch_apply_feedback(self, inputs: List[list[float]], actions: List[int], outcomes: List[float], 
+                            success: float, trial_final_success: float = 0.0) -> None:
+        """
+        Apply feedback for multiple observations in a batch for better performance.
+        All inputs, actions, and outcomes should have the same length.
+        """
+        if len(inputs) == 0:
+            return
+        
+        # Create engrams for all inputs, storing only the input state vector
+        # Success is stored separately in trial_final_success field for scoring purposes
+        engrams = []
+        for input_vec, action, outcome in zip(inputs, actions, outcomes):
+            engram = Engram(vector=input_vec, action=action, outcome=outcome)
+            engrams.append(engram)
+        
+        # Batch insert all engrams at once
+        trial_final_successes = [trial_final_success] * len(engrams)
+        
+        self.engram_store.batch_insert(engrams, trial_final_successes)
 
         
         

@@ -154,6 +154,66 @@ def plot_engram_distances(metrics: Dict[str, Any], window_size: int = 50, save_p
         plt.show()
 
 
+def save_settings_file(metrics: Dict[str, Any], output_dir: str):
+    """
+    Save settings to a text file in the output directory.
+    
+    Args:
+        metrics: Metrics dictionary loaded from JSON
+        output_dir: Directory to save the settings file
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+    settings_file = os.path.join(output_dir, 'settings.txt')
+    
+    with open(settings_file, 'w') as f:
+        f.write("=" * 60 + "\n")
+        f.write(f"Training Settings: {metrics.get('instance_name', 'Unknown')}\n")
+        f.write("=" * 60 + "\n\n")
+        
+        if 'settings' in metrics:
+            settings = metrics['settings']
+            # Group settings by category
+            categories = {
+                'Core Settings': [
+                    'STATE_VECTOR_SIZE', 'OUTPUT_VECTOR_SIZE', 'NOISE', 'MIN_RESULTS',
+                    'READ_ONLY', 'DROP_COLLECTION'
+                ],
+                'Trial Settings': [
+                    'MAX_TRIAL_LENGTH', 'USE_HIT_POINTS', 'HIT_POINTS', 'METABOLIC_COST'
+                ],
+                'Panic Settings': [
+                    'PANIC_ENABLED', 'PANIC_MAX_NOISE'
+                ],
+                'Action Selection': [
+                    'PROBABILISTIC_CHOICE', 'DISPLAY', 'SHOW_ACTION_OUTPUT'
+                ],
+                'Decay Ranker Settings': [
+                    'DECAY_ENABLED', 'DECAY_FUNCTION', 'DECAY_OFFSET_IDS',
+                    'DECAY_SCALE_IDS', 'DECAY_VALUE'
+                ],
+                'Trial Success Multiplier': [
+                    'TRIAL_SUCCESS_MULTIPLIER_SCALE'
+                ]
+            }
+            
+            for category, keys in categories.items():
+                f.write(f"{category}:\n")
+                f.write("-" * 60 + "\n")
+                for key in keys:
+                    if key in settings:
+                        value = settings[key]
+                        # Format boolean values nicely
+                        if isinstance(value, bool):
+                            value = 'True' if value else 'False'
+                        f.write(f"  {key:30} = {value}\n")
+                f.write("\n")
+        else:
+            f.write("No settings found in metrics file.\n")
+    
+    print(f"Settings saved to {settings_file}")
+
+
 def plot_all_metrics(metrics_file: str, output_dir: Optional[str] = None):
     """
     Generate all standard plots from a metrics JSON file.
@@ -165,6 +225,10 @@ def plot_all_metrics(metrics_file: str, output_dir: Optional[str] = None):
     metrics = load_metrics(metrics_file)
     
     base_name = metrics_file.replace('.json', '') if metrics_file.endswith('.json') else metrics_file
+    
+    # Save settings file if output directory is specified
+    if output_dir:
+        save_settings_file(metrics, output_dir)
     
     plots = [
         (plot_learning_curve, 'learning_curve.png'),

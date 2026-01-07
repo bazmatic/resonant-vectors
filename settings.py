@@ -1,18 +1,22 @@
-STATE_VECTOR_SIZE = 9
+STATE_VECTOR_SIZE = 8
 OUTPUT_VECTOR_SIZE = 4
-NOISE = 0.1
-MIN_RESULTS = 300
-READ_ONLY = False
-DROP_COLLECTION = True
+NOISE = 0.01
+MIN_RESULTS = 100
+READ_ONLY = True
+DROP_COLLECTION = False
 USE_HIT_POINTS = True
-HIT_POINTS = 300
+HIT_POINTS = 500
 MAX_TRIAL_LENGTH = 400
 METABOLIC_COST = 0.2
 
-ORIENTATION_BONUS = 2
-PROBABILISTIC_CHOICE = True
+# Panic feature settings
+PANIC_ENABLED = True
+PANIC_MAX_NOISE = 1
+
+PROBABILISTIC_CHOICE = False
 DISPLAY = True
 SHOW_ACTION_OUTPUT = True
+
 
 # Decay ranker settings for order-based ranking
 DECAY_ENABLED = False
@@ -28,4 +32,27 @@ DECAY_VALUE = 0.9  # Score value at the scale distance
 # - With scale=0.5: best trials multiply scores by 1.5, worst by 0.5
 # - With scale=1.0: best trials multiply scores by 2.0, worst by 0.0
 # - Set to 0.0 to disable trial-based scoring
-TRIAL_SUCCESS_MULTIPLIER_SCALE = 0.5  # Controls strength of trial success multiplier on vector scores
+TRIAL_SUCCESS_MULTIPLIER_SCALE = 0  # Controls strength of trial success multiplier on vector scores
+
+# Vector component weightings
+# Weightings for each of the 8 input state vector components to control their relative importance
+# in similarity search calculations. Higher weights make components contribute more to distance.
+# Default is all 1.0 (equal weighting). Modify to experiment with component importance.
+# Component mapping (LunarLander environment):
+#   [0]: x position (horizontal position)
+#   [1]: y position (vertical position)
+#   [2]: vx (horizontal velocity)
+#   [3]: vy (vertical velocity)
+#   [4]: angle (orientation in radians)
+#   [5]: angular velocity (rotation rate,)
+#   [6]: leg contact 1 (boolean, set to 0)
+#   [7]: leg contact 2 (boolean, set to 0)
+VECTOR_COMPONENT_WEIGHTS = [0.3, 1.4, 1, 1.2, 1.2, 1.0, 1.0, 1.0]  # 8 weights, one per input component
+
+# Vector sampling settings
+# Fraction of vectors to randomly sample and save (0.0 to 1.0)
+# 1.0 = save all vectors, 0.5 = save 50% randomly selected, 0.0 = save none
+VECTOR_SAVE_RATE = 0.25
+
+# Training settings
+TRIALS_PER_EXPERIMENT = 1500  # Number of trials to run per training experiment

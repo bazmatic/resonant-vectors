@@ -120,7 +120,7 @@ Training proceeds through a series of trials on the LunarLander-v2 environment f
 
 1. **Observation Normalization**: The raw state observation from the environment (8 dimensions: x, y, velocity components, angle, angular velocity, and leg contact booleans) is normalized by dividing each component by its typical range. The normalized observation is then extended to 9 dimensions by zero-padding.
 
-2. **Resonator Creation**: The normalized state is converted into a **resonator vector** for similarity matching. This transformation applies learned dimension weights to emphasize or de-emphasize different state components, then appends a success metric (the agent's recent average performance) as an additional dimension. The resonator vector thus encodes both the current state and the agent's current performance level.
+2. **Resonator Creation**: The normalized state is converted into a **resonator vector** for similarity matching. This transformation appends a success metric (the agent's recent average performance) as an additional dimension. The resonator vector thus encodes both the current state and the agent's current performance level.
 
 3. **Similarity Search**: The system queries the Milvus database to find the 300 most similar historical engrams to the current resonator vector, using Euclidean distance in the 9-dimensional space.
 
@@ -156,19 +156,6 @@ After each trial completes, the feedback queue is processed to create new engram
    The engram is then inserted into the Milvus collection, where it becomes available for future similarity searches.
 
 This mechanism ensures that successful trials contribute more engrams with positive outcomes, while unsuccessful trials contribute engrams with negative outcomes. Over time, the collection accumulates a memory of which actions tend to work well in which situations, creating a bias toward historically successful patterns.
-
-### Genetic Algorithm Evolution (Optional)
-
-The system can optionally evolve optimal dimension weights using a genetic algorithm. The **Breeder** maintains a population of genomes, where each genome is a vector of 8 weights (one per state dimension).
-
-For each generation:
-1. **Fitness Evaluation**: Each genome is evaluated by training a complete agent using those dimension weights and measuring the average reward achieved.
-2. **Selection**: The top 50% of the population (by fitness) are selected as parents.
-3. **Breeding**: Offspring are created by randomly selecting each gene from either parent with equal probability (shuffle crossover).
-4. **Mutation**: Each offspring is mutated by adding small random noise (mutation rate 0.001).
-5. **Replacement**: The bottom 50% of the population is replaced with the new offspring.
-
-This process allows the system to discover which state dimensions are most important for decision-making, potentially improving performance by focusing similarity matching on the most relevant aspects of the state.
 
 ### Experimental Configuration
 

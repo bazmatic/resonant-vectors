@@ -15,6 +15,7 @@ from settings import (
     DECAY_OFFSET_IDS,
     DECAY_SCALE_IDS,
     DECAY_VALUE,
+    VECTOR_SAVE_RATE,
 )
 from typing import Dict, Optional, List
 
@@ -24,20 +25,12 @@ class Engram:
             vector: list[float],
             action: int, 
             outcome: float,
-            trial_number: int = 0,
             trial_final_success: float = 0.0,
-            trial_raw_reward: float = 0.0,
-            trial_episode_length: int = 0,
-            trial_is_success: bool = False,
         ):
         self.vector = vector
         self.action = action
         self.outcome = outcome
-        self.trial_number = trial_number
         self.trial_final_success = trial_final_success
-        self.trial_raw_reward = trial_raw_reward
-        self.trial_episode_length = trial_episode_length
-        self.trial_is_success = trial_is_success
 
     @staticmethod
     def from_record(record: list):
@@ -45,11 +38,7 @@ class Engram:
             vector=record.fields[EngramField.vector],
             action=record.fields[EngramField.action],
             outcome=record.fields[EngramField.outcome],
-            trial_number=record.fields.get(EngramField.trial_number, 0),
             trial_final_success=record.fields.get(EngramField.trial_final_success, 0.0),
-            trial_raw_reward=record.fields.get(EngramField.trial_raw_reward, 0.0),
-            trial_episode_length=record.fields.get(EngramField.trial_episode_length, 0),
-            trial_is_success=record.fields.get(EngramField.trial_is_success, False),
         )
     
     @staticmethod
@@ -70,11 +59,7 @@ class EngramField:
     vector = "vector"
     action = "action"
     outcome = "outcome"
-    trial_number = "trial_number"
     trial_final_success = "trial_final_success"
-    trial_raw_reward = "trial_raw_reward"
-    trial_episode_length = "trial_episode_length"
-    trial_is_success = "trial_is_success"
 
 class EngramStore:
 
@@ -88,11 +73,7 @@ class EngramStore:
             FieldSchema(name=EngramField.vector, dtype=DataType.FLOAT_VECTOR, dim=STATE_VECTOR_SIZE, description='The state embedding'),
             FieldSchema(name=EngramField.action, dtype=DataType.INT16, description='The action taken'),
             FieldSchema(name=EngramField.outcome, dtype=DataType.FLOAT, description="Negative means penalty, positive means reward"),
-            FieldSchema(name=EngramField.trial_number, dtype=DataType.INT64, description='Trial number this engram came from'),
             FieldSchema(name=EngramField.trial_final_success, dtype=DataType.FLOAT, description='Normalized final success value of the trial'),
-            FieldSchema(name=EngramField.trial_raw_reward, dtype=DataType.FLOAT, description='Raw reward from the trial'),
-            FieldSchema(name=EngramField.trial_episode_length, dtype=DataType.INT64, description='Length of the episode in steps'),
-            FieldSchema(name=EngramField.trial_is_success, dtype=DataType.BOOL, description='Whether the trial was successful (reward >= 200)'),
         ]
         schema = CollectionSchema(fields=fields, description="Collection of states")
         return schema
@@ -100,6 +81,9 @@ class EngramStore:
     def __init__(self, name: str = "lander", reset: bool = False):
         self.collection_name = name
         self._insertion_counter = 0  # Track sequential insertion index
+        self._collection_loaded = False  # Track whether collection is loaded in memory
+        self._pending_flush = False  # Track if we have unflushed inserts
+        self._cached_count = None  # Cache for entity count
         self.connect_to_db(reset)   
           
         #self.collection=Collection(name=self.collection_name)
@@ -110,12 +94,20 @@ class EngramStore:
             print(f"Dropping collection {self.collection_name}")
             utility.drop_collection(self.collection_name)
             self._insertion_counter = 0
+            self._collection_loaded = False  # Reset load state after dropping collection
+            self._pending_flush = False  # Reset flush flag after dropping collection
+            self._cached_count = None  # Reset cached count
         else:
             print(f"Using existing collection {self.collection_name}")
         self.make_collection()
         # Initialize counter from existing collection if it exists and wasn't reset
         if not reset and utility.has_collection(self.collection_name):
-            self._initialize_insertion_counter()      
+            # Simply use num_entities as the starting point - much faster than searching
+            self._ensure_loaded()
+            self._insertion_counter = self.collection.num_entities
+        else:
+            # Load collection after creating new one (if reset or new collection)
+            self._ensure_loaded()      
 
     # def init(self):
     #     self.connect_to_db()
@@ -134,63 +126,100 @@ class EngramStore:
 
         self.collection.create_index("vector", index)
 
-    def _initialize_insertion_counter(self):
-        """Initialize the insertion counter from the existing collection's max insertion_index."""
-        try:
+    def _ensure_loaded(self):
+        """Ensure the collection is loaded in memory. Loads only if not already loaded."""
+        # Flush any pending inserts before loading/searching
+        if self._pending_flush:
+            self.collection.flush()
+            self._pending_flush = False
+        
+        if not self._collection_loaded:
             self.collection.load()
-            num_entities = self.collection.num_entities
-            if num_entities == 0:
-                self._insertion_counter = 0
-                return
-            
-            # Query for the maximum insertion_index
-            import numpy as np
-            max_index = None
-            # Sample multiple searches to find max insertion_index
-            for _ in range(5):
-                dummy_vector = np.random.random(STATE_VECTOR_SIZE).tolist()
-                search_results = self.collection.search(
-                    data=[dummy_vector],
-                    limit=min(1000, num_entities),
-                    param={"metric_type": "L2", "params": {"nprobe": 16}},
-                    anns_field=EngramField.vector,
-                    output_fields=[EngramField.insertion_index]
-                )
-                if search_results and len(search_results[0]) > 0:
-                    indices = [hit.entity.get(EngramField.insertion_index) for hit in search_results[0] if EngramField.insertion_index in hit.entity]
-                    if indices:
-                        sample_max = max(indices)
-                        if max_index is None or sample_max > max_index:
-                            max_index = sample_max
-            
-            if max_index is not None:
-                self._insertion_counter = max_index
-            else:
-                # If field doesn't exist in old collections, start from num_entities
-                self._insertion_counter = num_entities
-        except Exception:
-            # On error, use num_entities as fallback
-            self._insertion_counter = self.collection.num_entities
+            self._collection_loaded = True
 
-    def insert(self, record: Engram, trial_number: int = 0, trial_final_success: float = 0.0, 
-               trial_raw_reward: float = 0.0, trial_episode_length: int = 0, trial_is_success: bool = False):       
+    def insert(self, record: Engram, trial_final_success: float = 0.0):       
+        # Apply random sampling if VECTOR_SAVE_RATE < 1.0
+        if VECTOR_SAVE_RATE < 1.0:
+            # Randomly decide whether to save this vector
+            if np.random.random() >= VECTOR_SAVE_RATE:
+                # Skip this vector
+                return
+        
         # Increment counter and assign insertion index
         self._insertion_counter += 1
         insertion_index = self._insertion_counter
         
-        # Insert fields in schema order (excluding auto_id): insertion_index, vector, action, outcome, 
-        # trial_number, trial_final_success, trial_raw_reward, trial_episode_length, trial_is_success
+        # Insert fields in schema order (excluding auto_id): insertion_index, vector, action, outcome, trial_final_success
         self.collection.insert([
             [insertion_index],
             [record.vector], 
             [record.action], 
             [record.outcome],
-            [trial_number],
-            [trial_final_success],
-            [trial_raw_reward],
-            [trial_episode_length],
-            [trial_is_success]
+            [trial_final_success]
         ], 0.0001)
+        
+        # Mark that we have pending inserts that need to be flushed
+        # We'll flush before the next search/load operation
+        self._pending_flush = True
+        # Invalidate cached count since we've inserted a new record
+        self._cached_count = None
+
+    def batch_insert(self, records: List[Engram], trial_final_successes: List[float] = None):
+        """
+        Insert multiple engrams in a single batch operation for better performance.
+        All lists should have the same length as records, or be None to use defaults.
+        """
+        if len(records) == 0:
+            return
+        
+        # Use defaults if not provided
+        if trial_final_successes is None:
+            trial_final_successes = [0.0] * len(records)
+        
+        # Apply random sampling if VECTOR_SAVE_RATE < 1.0
+        if VECTOR_SAVE_RATE < 1.0:
+            # Randomly select which indices to keep
+            num_to_keep = int(len(records) * VECTOR_SAVE_RATE)
+            if num_to_keep == 0:
+                # If rate is very low and no vectors would be saved, return early
+                return
+            # Randomly select indices to keep
+            selected_indices = np.random.choice(len(records), size=num_to_keep, replace=False)
+            selected_indices = sorted(selected_indices)  # Sort for consistent ordering
+        else:
+            # Save all vectors
+            selected_indices = list(range(len(records)))
+        
+        # Prepare batch data only for selected vectors
+        insertion_indices = []
+        vectors = []
+        actions = []
+        outcomes = []
+        trial_finals = []
+        
+        for i in selected_indices:
+            self._insertion_counter += 1
+            insertion_indices.append(self._insertion_counter)
+            vectors.append(records[i].vector)
+            actions.append(records[i].action)
+            outcomes.append(records[i].outcome)
+            trial_finals.append(trial_final_successes[i])
+        
+        # Only insert if we have vectors to save
+        if len(insertion_indices) > 0:
+            # Batch insert all at once
+            self.collection.insert([
+                insertion_indices,
+                vectors,
+                actions,
+                outcomes,
+                trial_finals
+            ], 0.0001)
+            
+            # Mark that we have pending inserts that need to be flushed
+            self._pending_flush = True
+            # Invalidate cached count since we've inserted new records
+            self._cached_count = None
 
     def _get_max_insertion_index(self) -> int:
         """Get the current maximum insertion_index from the collection."""
@@ -226,7 +255,7 @@ class EngramStore:
         return ranker
     
     def nearest(self, vector: list[float], limit: int) -> list[Engram, float]:
-        self.collection.load()
+        self._ensure_loaded()
 
         # Create decay ranker if enabled
         ranker = self._create_decay_ranker()
@@ -235,14 +264,12 @@ class EngramStore:
         search_params = {
             "metric_type": "L2", # Euclidean distance
             "params": { 
-                "nprobe": 16 # 16 clusters to search
+                "nprobe": 8 # 12 clusters to search
             }
         }
 
         # Perform search with optional decay ranker
-        output_fields = ["id", "insertion_index", "vector", "action", "outcome", EngramField.trial_number,
-                        EngramField.trial_final_success, EngramField.trial_raw_reward, 
-                        EngramField.trial_episode_length, EngramField.trial_is_success]
+        output_fields = ["id", "insertion_index", "vector", "action", "outcome", EngramField.trial_final_success]
         if ranker is not None:
             records = self.collection.search(
                 data=[vector],
@@ -268,16 +295,22 @@ class EngramStore:
         return result
     
     def get_count(self) -> int:
-        """Return the total number of engrams in the collection."""
-        self.collection.load()
-        return self.collection.num_entities
+        """Return the total number of engrams in the collection. Uses cached value if available."""
+        # Return cached count if available and collection hasn't been reset
+        if self._cached_count is not None:
+            return self._cached_count
+        
+        # Calculate and cache the count
+        self._ensure_loaded()
+        self._cached_count = self.collection.num_entities
+        return self._cached_count
     
     def get_outcome_stats(self, sample_size: int = 1000) -> Dict[str, float]:
         """
         Sample engrams and return outcome distribution statistics.
         Returns a dict with 'positive_ratio', 'negative_ratio', 'mean_outcome'.
         """
-        self.collection.load()
+        self._ensure_loaded()
         total_count = self.collection.num_entities
         
         if total_count == 0:
@@ -295,7 +328,7 @@ class EngramStore:
             limit=sample_limit,
             param={
                 "metric_type": "L2",
-                "params": {"nprobe": 16}
+                "params": {"nprobe": 12}
             },
             anns_field=EngramField.vector,
             output_fields=["outcome"]
