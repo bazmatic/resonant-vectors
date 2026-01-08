@@ -1,6 +1,6 @@
 from engram import Engram, EngramStore
 import numpy as np
-from settings import NOISE, MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, PANIC_MAX_NOISE
+from settings import NOISE, MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, PANIC_MAX_NOISE, DELETE_OLDEST_BEFORE_INSERT
 from IResonatorFactory import IResonatorFactory
 from typing import List, Tuple
 
@@ -66,6 +66,10 @@ class EngramBrain:
         # Return a vector of length output_size (Engram.action)
         # Different algorithms could go here, such as a neural network, which could take into account the scary low-scoring engrams too.
         # Scores are weighted by distance: closer engrams have more influence.
+
+        #If one of the legs is touching the ground, choose No Action (index 0) with 100% confidence
+        if input[6] == 1 or input[7] == 1:
+            return [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         if len(scored_engrams) == 0:
             return np.random.random(self.output_size)
@@ -135,6 +139,13 @@ class EngramBrain:
         for input_vec, action, outcome in zip(inputs, actions, outcomes):
             engram = Engram(vector=input_vec, action=action, outcome=outcome)
             engrams.append(engram)
+        
+        # If enabled, delete oldest records before inserting new ones
+        if DELETE_OLDEST_BEFORE_INSERT:
+            num_to_delete = len(engrams)
+            deleted_count = self.engram_store.delete_oldest_records(num_to_delete+1)
+            if deleted_count > 0:
+                print(f"Deleted {deleted_count} oldest records before inserting {len(engrams)} new records")
         
         # Batch insert all engrams at once
         trial_final_successes = [trial_final_success] * len(engrams)

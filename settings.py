@@ -1,8 +1,8 @@
 STATE_VECTOR_SIZE = 8
 OUTPUT_VECTOR_SIZE = 4
-NOISE = 0.01
-MIN_RESULTS = 100
-READ_ONLY = True
+NOISE = 0.05
+MIN_RESULTS = 400
+READ_ONLY = False
 DROP_COLLECTION = False
 USE_HIT_POINTS = True
 HIT_POINTS = 500
@@ -10,13 +10,12 @@ MAX_TRIAL_LENGTH = 400
 METABOLIC_COST = 0.2
 
 # Panic feature settings
-PANIC_ENABLED = True
+PANIC_ENABLED = False
 PANIC_MAX_NOISE = 1
 
 PROBABILISTIC_CHOICE = False
-DISPLAY = True
-SHOW_ACTION_OUTPUT = True
-
+DISPLAY = False
+SHOW_ACTION_OUTPUT = False
 
 # Decay ranker settings for order-based ranking
 DECAY_ENABLED = False
@@ -47,12 +46,21 @@ TRIAL_SUCCESS_MULTIPLIER_SCALE = 0  # Controls strength of trial success multipl
 #   [5]: angular velocity (rotation rate,)
 #   [6]: leg contact 1 (boolean, set to 0)
 #   [7]: leg contact 2 (boolean, set to 0)
-VECTOR_COMPONENT_WEIGHTS = [0.3, 1.4, 1, 1.2, 1.2, 1.0, 1.0, 1.0]  # 8 weights, one per input component
+#0.6, 1.4, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0
+#0.5, 1.4, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0
+# VECTOR_COMPONENT_WEIGHTS = [0.3, 1.4, 1, 1.2, 1.2, 1.0, 1.0, 1.0]  # 8 weights, one per input component
+VECTOR_COMPONENT_WEIGHTS = [0.5, 1.4, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0]  # 8 weights, one per input component
 
 # Vector sampling settings
 # Fraction of vectors to randomly sample and save (0.0 to 1.0)
 # 1.0 = save all vectors, 0.5 = save 50% randomly selected, 0.0 = save none
-VECTOR_SAVE_RATE = 0.25
+VECTOR_SAVE_RATE = 0.2
+
+# Delete oldest records before insert
+# If True, before inserting records via batch_apply_feedback, delete the same number
+# of oldest records first (based on insertion_index). This maintains a roughly constant
+# collection size over time.
+DELETE_OLDEST_BEFORE_INSERT = False
 
 # Training settings
 TRIALS_PER_EXPERIMENT = 1500  # Number of trials to run per training experiment

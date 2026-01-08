@@ -16,6 +16,7 @@ from settings import (
     DECAY_SCALE_IDS,
     DECAY_VALUE,
     VECTOR_SAVE_RATE,
+    DELETE_OLDEST_BEFORE_INSERT,
 )
 from typing import Dict, Optional, List
 
@@ -344,6 +345,121 @@ class EngramStore:
             'negative_ratio': negative_count / len(outcomes) if outcomes else 0.0,
             'mean_outcome': mean_outcome
         }
+    
+    def delete_oldest_records(self, count: int) -> int:
+        """
+        Delete the N oldest records from the collection based on insertion_index.
+        Returns the number of records actually deleted.
+        """
+        if count <= 0:
+            return 0
+        
+        self._ensure_loaded()
+        
+        # Get total count to check if we have enough records
+        total_count = self.get_count()
+        if total_count == 0:
+            return 0
+        
+        # If we have fewer records than requested, delete all existing records
+        records_to_delete = min(count, total_count)
+        
+        # Milvus has a maximum query result window of 16384 (offset + limit <= 16384)
+        # Since insertion_index is sequential starting from 1, the oldest records will have
+        # the lowest insertion_index values. Query for records with low insertion_index.
+        MAX_QUERY_LIMIT = 16384
+        
+        # Estimate an upper bound for insertion_index to query
+        # Account for VECTOR_SAVE_RATE: if we need N records and save rate is R,
+        # we might need to look at approximately N/R insertion_index values
+        from settings import VECTOR_SAVE_RATE
+        save_rate = max(VECTOR_SAVE_RATE, 0.01)  # Avoid division by zero
+        estimated_max_index = int(records_to_delete / save_rate * 2)  # Safety multiplier of 2
+        
+        # Query records with insertion_index up to the estimate
+        # Use limit that respects Milvus's 16384 constraint
+        query_limit = min(MAX_QUERY_LIMIT, estimated_max_index)
+        
+        all_results = []
+        current_max_index = min(estimated_max_index, self._insertion_counter)
+        
+        # Query and expand range if we don't have enough results
+        while len(all_results) < records_to_delete and current_max_index <= self._insertion_counter:
+            # Query a batch
+            batch_results = self.collection.query(
+                expr=f"{EngramField.insertion_index} >= 0 && {EngramField.insertion_index} <= {current_max_index}",
+                output_fields=[EngramField.id, EngramField.insertion_index],
+                limit=query_limit
+            )
+            
+            if len(batch_results) == 0:
+                # No records in this range, expand and try again
+                if current_max_index >= self._insertion_counter:
+                    break  # Reached the max, no more records
+                current_max_index = min(current_max_index * 2, self._insertion_counter)
+                continue
+            
+            all_results.extend(batch_results)
+            
+            # If we got fewer results than requested and haven't hit the limit, we might have enough
+            # or need to expand. Check if we have enough records to delete.
+            if len(all_results) >= records_to_delete:
+                break
+            
+            # If we didn't hit the query limit, we've exhausted this range
+            if len(batch_results) < query_limit:
+                # Expand range if we still need more records
+                if current_max_index >= self._insertion_counter:
+                    break  # Reached the max
+                current_max_index = min(current_max_index * 2, self._insertion_counter)
+            else:
+                # We hit the query limit, need to query in chunks using offset
+                # But Milvus limits offset+limit <= 16384, so we need a different approach
+                # Instead, expand the insertion_index range for next query
+                current_max_index = min(current_max_index * 2, self._insertion_counter)
+        
+        if len(all_results) == 0:
+            return 0
+        
+        # Sort by insertion_index (ascending) to get oldest first
+        all_results.sort(key=lambda x: x[EngramField.insertion_index])
+        
+        # Remove duplicates (in case we queried overlapping ranges)
+        seen_ids = set()
+        unique_results = []
+        for record in all_results:
+            record_id = record[EngramField.id]
+            if record_id not in seen_ids:
+                seen_ids.add(record_id)
+                unique_results.append(record)
+        
+        # Take only the number we need
+        oldest_records = unique_results[:records_to_delete]
+        
+        if len(oldest_records) == 0:
+            return 0
+        
+        # Extract IDs
+        ids_to_delete = [record[EngramField.id] for record in oldest_records]
+        
+        # Delete in batches if we have too many IDs (to avoid expression length limits)
+        BATCH_SIZE = 1000  # Conservative batch size for delete expressions
+        total_deleted = 0
+        
+        for i in range(0, len(ids_to_delete), BATCH_SIZE):
+            batch_ids = ids_to_delete[i:i + BATCH_SIZE]
+            id_list_str = ",".join(str(id) for id in batch_ids)
+            delete_expr = f"{EngramField.id} in [{id_list_str}]"
+            self.collection.delete(delete_expr)
+            total_deleted += len(batch_ids)
+        
+        # Flush to ensure deletion is persisted
+        self.collection.flush()
+        
+        # Invalidate cached count
+        self._cached_count = None
+        
+        return total_deleted
 
    
 def test():
