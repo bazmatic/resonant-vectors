@@ -27,3 +27,4 @@ venv/
 volumes/
 *.png
 experiments/
+training_metrics*.json

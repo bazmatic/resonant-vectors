@@ -21,6 +21,8 @@ pycparser==2.22
 pycryptodome==3.20.0
 pygame==2.5.2
 pymilvus==2.3.4
+langchain-community>=0.0.20
+faiss-cpu>=1.7.4
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
 pytz==2024.1
@@ -32,3 +34,4 @@ ujson==5.10.0
 urllib3==2.2.2
 pytest>=7.0.0
 pytest-mock>=3.10.0
+matplotlib>=3.10.0

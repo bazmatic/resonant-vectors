@@ -1,8 +1,9 @@
 from engram import Engram, EngramStore
 import numpy as np
-from settings import NOISE, MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, PANIC_MAX_NOISE, DELETE_OLDEST_BEFORE_INSERT
+from settings import NOISE_START, NOISE_END, NOISE_DECAY_RATE, MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, PANIC_MAX_NOISE, DELETE_BEFORE_INSERT_STRATEGY, SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD
 from IResonatorFactory import IResonatorFactory
 from typing import List, Tuple
+from math import exp
 
 # Generic brain that can be trained to make decisions based on input
 #
@@ -14,13 +15,53 @@ class EngramBrain:
         self.output_size = output_size
         self.engram_store = engram_store
         self.resonator_factory = resonator_factory
+    
+    @staticmethod
+    def calculate_base_noise(episode_progress: float) -> float:
+        """
+        Calculate base noise level based on episode progress (without panic factor).
+        
+        Args:
+            episode_progress: Progress through episode (0.0 at start, approaches 1.0 at end)
+        
+        Returns:
+            Base noise value with exponential decay (no panic scaling)
+        """
+        # Calculate episode noise using exponential decay
+        # Noise starts at NOISE_START and asymptotically approaches NOISE_END
+        return NOISE_END + (NOISE_START - NOISE_END) * exp(-NOISE_DECAY_RATE * episode_progress)
+    
+    @staticmethod
+    def calculate_noise(episode_progress: float, panic_factor: float = 0.0) -> float:
+        """
+        Calculate noise level based on episode progress and panic factor.
+        
+        Args:
+            episode_progress: Progress through episode (0.0 at start, approaches 1.0 at end)
+            panic_factor: Panic factor multiplier (0.0 to 1.0, default 0.0)
+        
+        Returns:
+            Final noise value with exponential decay and optional panic scaling
+        """
+        # Calculate base episode noise using exponential decay
+        episode_noise = EngramBrain.calculate_base_noise(episode_progress)
+        
+        # Apply panic_factor multiplicatively to scale the current episode noise
+        if panic_factor > 0.0:
+            # Multiplicative scaling: panic multiplies the current episode noise
+            # This maintains relative panic effect throughout the episode
+            noise = episode_noise * (1.0 + panic_factor * (PANIC_MAX_NOISE / NOISE_START - 1.0))
+        else:
+            noise = episode_noise
+        
+        return noise
 
     # Given an input, generate an output
-    def decide(self, input: np.ndarray, success: float, return_distance_info: bool = False, panic_factor: float = 0.0):
+    def decide(self, input: np.ndarray, success: float, return_distance_info: bool = False, panic_factor: float = 0.0, episode_progress: float = 0.0):
         resonator = self.input_to_resonator(input, success)
         resonating_engrams = self.get_resonating_engrams(resonator, MIN_RESULTS)
         scored_ngrams = self.score_engrams(resonating_engrams)
-        output = self.make_output(input, scored_ngrams, panic_factor)
+        output = self.make_output(input, scored_ngrams, panic_factor, episode_progress)
         
         if return_distance_info:
             # Calculate average distance of retrieved engrams
@@ -62,10 +103,13 @@ class EngramBrain:
         result.sort(key=lambda x: x[1], reverse=True)   
         return result
     
-    def make_output(self, input: list[float], scored_engrams: list[tuple], panic_factor: float = 0.0) -> list[float]:
+    def make_output(self, input: list[float], scored_engrams: list[tuple], panic_factor: float = 0.0, episode_progress: float = 0.0) -> list[float]:
         # Return a vector of length output_size (Engram.action)
         # Different algorithms could go here, such as a neural network, which could take into account the scary low-scoring engrams too.
         # Scores are weighted by distance: closer engrams have more influence.
+
+        # Calculate noise for action scoring
+        noise = self.calculate_noise(episode_progress, panic_factor)
 
         #If one of the legs is touching the ground, choose No Action (index 0) with 100% confidence
         if input[6] == 1 or input[7] == 1:
@@ -104,13 +148,6 @@ class EngramBrain:
                 out=np.zeros_like(action_weighted_scores), 
                 where=action_total_weights!=0
             )
-
-            # Calculate dynamic noise based on panic factor (exponential scaling)
-            if panic_factor > 0.0:
-                # Exponential scaling: noise = NOISE * (PANIC_MAX_NOISE / NOISE) ** panic_factor
-                noise = NOISE * (PANIC_MAX_NOISE / NOISE) ** panic_factor
-            else:
-                noise = NOISE
             
             action_scores = action_scores + np.random.normal(0, noise, self.output_size)
 
@@ -140,12 +177,27 @@ class EngramBrain:
             engram = Engram(vector=input_vec, action=action, outcome=outcome)
             engrams.append(engram)
         
-        # If enabled, delete oldest records before inserting new ones
-        if DELETE_OLDEST_BEFORE_INSERT:
+        # Determine deletion strategy
+        strategy = DELETE_BEFORE_INSERT_STRATEGY
+        
+        # No deletion occurs until threshold is reached
+        if strategy is not None:
+            current_count = self.engram_store.get_count()
+            if current_count < SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD:
+                # Before threshold is reached, don't delete anything
+                strategy = None
+        
+        # Delete records based on strategy before inserting new ones
+        if strategy is not None:
             num_to_delete = len(engrams)
-            deleted_count = self.engram_store.delete_oldest_records(num_to_delete+1)
-            if deleted_count > 0:
-                print(f"Deleted {deleted_count} oldest records before inserting {len(engrams)} new records")
+            if strategy == "Oldest":
+                deleted_count = self.engram_store.delete_oldest_records(num_to_delete)
+                # if deleted_count > 0:
+                #     print(f"Deleted {deleted_count} oldest records before inserting {len(engrams)} new records")
+            elif strategy == "Random":
+                deleted_count = self.engram_store.delete_random_records(num_to_delete)
+                # if deleted_count > 0:
+                #     print(f"Deleted {deleted_count} random records before inserting {len(engrams)} new records")
         
         # Batch insert all engrams at once
         trial_final_successes = [trial_final_success] * len(engrams)
