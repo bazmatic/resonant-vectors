@@ -17,15 +17,18 @@ def load_metrics(filename: str) -> Dict[str, Any]:
 
 def plot_learning_curve(metrics: Dict[str, Any], window_size: int = 50, save_path: Optional[str] = None):
     """
-    Plot learning curve showing reward over time with rolling average.
+    Plot learning curve showing reward over cumulative engrams with rolling average and noise.
     
     Args:
         metrics: Metrics dictionary loaded from JSON
         window_size: Size of rolling average window
         save_path: Optional path to save the figure
     """
+    from math import exp
+    
     rewards = metrics['metrics']['rewards']
-    trials = list(range(1, len(rewards) + 1))
+    # Use cumulative_engrams if available, fall back to engram_counts for older metrics
+    x_values = metrics['metrics'].get('cumulative_engrams', metrics['metrics']['engram_counts'])
     
     # Calculate rolling average
     rolling_avg = []
@@ -34,26 +37,57 @@ def plot_learning_curve(metrics: Dict[str, Any], window_size: int = 50, save_pat
         window = rewards[start_idx:i+1]
         rolling_avg.append(sum(window) / len(window))
     
-    plt.figure(figsize=(10, 6))
-    plt.plot(trials, rewards, alpha=0.3, color='lightblue', label='Episode Reward')
-    plt.plot(trials, rolling_avg, color='blue', linewidth=2, label=f'Rolling Average ({window_size} episodes)')
-    plt.axhline(y=200, color='green', linestyle='--', label='Solved Threshold (200)')
-    plt.xlabel('Episode')
-    plt.ylabel('Reward')
+    # Calculate noise for each episode based on settings
+    settings = metrics.get('settings', {})
+    noise_start = settings.get('NOISE_START', 0.2)
+    noise_end = settings.get('NOISE_END', 0.05)
+    noise_decay_rate = settings.get('NOISE_DECAY_RATE', 3.0)
+    
+    total_episodes = len(rewards)
+    noise_values = []
+    for i in range(total_episodes):
+        episode_progress = i / total_episodes if total_episodes > 0 else 0
+        noise = noise_end + (noise_start - noise_end) * exp(-noise_decay_rate * episode_progress)
+        noise_values.append(noise)
+    
+    # Create figure with two y-axes
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    
+    # Plot rewards on primary axis
+    ax1.plot(x_values, rewards, alpha=0.3, color='lightblue', label='Episode Reward')
+    ax1.plot(x_values, rolling_avg, color='blue', linewidth=2, label=f'Rolling Average ({window_size} episodes)')
+    ax1.axhline(y=200, color='green', linestyle='--', label='Solved Threshold (200)')
+    ax1.set_xlabel('Cumulative Engrams Added')
+    ax1.set_ylabel('Reward', color='blue')
+    ax1.tick_params(axis='y', labelcolor='blue')
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot noise on secondary axis
+    ax2 = ax1.twinx()
+    ax2.plot(x_values, noise_values, color='orange', linewidth=1.5, alpha=0.7, label='Noise')
+    ax2.set_ylabel('Noise', color='orange')
+    ax2.tick_params(axis='y', labelcolor='orange')
+    ax2.set_ylim(0, max(noise_values) * 1.1)  # Add some headroom
+    
+    # Combine legends from both axes
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    
     plt.title('Learning Curve')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Learning curve saved to {save_path}")
     else:
         plt.show()
+    
+    plt.close(fig)
 
 
 def plot_success_rate(metrics: Dict[str, Any], window_size: int = 100, save_path: Optional[str] = None):
     """
-    Plot success rate over time (percentage of episodes achieving >= 200 points).
+    Plot success rate over cumulative engrams (percentage of episodes achieving >= 200 points).
     
     Args:
         metrics: Metrics dictionary loaded from JSON
@@ -61,7 +95,8 @@ def plot_success_rate(metrics: Dict[str, Any], window_size: int = 100, save_path
         save_path: Optional path to save the figure
     """
     successes = metrics['metrics']['successes']
-    trials = list(range(1, len(successes) + 1))
+    # Use cumulative_engrams if available, fall back to engram_counts for older metrics
+    x_values = metrics['metrics'].get('cumulative_engrams', metrics['metrics']['engram_counts'])
     
     # Calculate rolling success rate
     success_rates = []
@@ -72,8 +107,8 @@ def plot_success_rate(metrics: Dict[str, Any], window_size: int = 100, save_path
         success_rates.append(success_rate)
     
     plt.figure(figsize=(10, 6))
-    plt.plot(trials, success_rates, color='green', linewidth=2)
-    plt.xlabel('Episode')
+    plt.plot(x_values, success_rates, color='green', linewidth=2)
+    plt.xlabel('Cumulative Engrams Added')
     plt.ylabel('Success Rate (%)')
     plt.title(f'Success Rate (rolling window: {window_size} episodes)')
     plt.ylim(0, 100)
@@ -113,7 +148,7 @@ def plot_memory_growth(metrics: Dict[str, Any], save_path: Optional[str] = None)
 
 def plot_engram_distances(metrics: Dict[str, Any], window_size: int = 50, save_path: Optional[str] = None):
     """
-    Plot average distance to retrieved engrams over time.
+    Plot average distance to retrieved engrams over cumulative engrams.
     
     Args:
         metrics: Metrics dictionary loaded from JSON
@@ -121,15 +156,18 @@ def plot_engram_distances(metrics: Dict[str, Any], window_size: int = 50, save_p
         save_path: Optional path to save the figure
     """
     distances = metrics['metrics']['engram_distances']
-    # Filter out infinite distances
-    valid_distances = [(i, d) for i, d in enumerate(distances) if d != float('inf')]
+    # Use cumulative_engrams if available, fall back to engram_counts for older metrics
+    engram_values = metrics['metrics'].get('cumulative_engrams', metrics['metrics']['engram_counts'])
     
-    if not valid_distances:
+    # Filter out infinite distances and get corresponding engram counts
+    valid_data = [(engram_values[i], d) for i, d in enumerate(distances) if d != float('inf')]
+    
+    if not valid_data:
         print("No valid distance data to plot")
         return
     
-    trials = [i + 1 for i, _ in valid_distances]
-    dist_values = [d for _, d in valid_distances]
+    x_values = [ec for ec, _ in valid_data]
+    dist_values = [d for _, d in valid_data]
     
     # Calculate rolling average
     rolling_avg = []
@@ -139,11 +177,11 @@ def plot_engram_distances(metrics: Dict[str, Any], window_size: int = 50, save_p
         rolling_avg.append(sum(window) / len(window))
     
     plt.figure(figsize=(10, 6))
-    plt.plot(trials, dist_values, alpha=0.3, color='orange', label='Episode Average Distance')
-    plt.plot(trials, rolling_avg, color='red', linewidth=2, label=f'Rolling Average ({window_size} episodes)')
-    plt.xlabel('Episode')
+    plt.plot(x_values, dist_values, alpha=0.3, color='orange', label='Episode Average Distance')
+    plt.plot(x_values, rolling_avg, color='red', linewidth=2, label=f'Rolling Average ({window_size} episodes)')
+    plt.xlabel('Cumulative Engrams Added')
     plt.ylabel('Average Distance to Retrieved Engrams')
-    plt.title('Engram Similarity Over Time')
+    plt.title('Engram Similarity Over Training')
     plt.legend()
     plt.grid(True, alpha=0.3)
     
@@ -176,8 +214,11 @@ def save_settings_file(metrics: Dict[str, Any], output_dir: str):
             # Group settings by category
             categories = {
                 'Core Settings': [
-                    'STATE_VECTOR_SIZE', 'OUTPUT_VECTOR_SIZE', 'NOISE', 'MIN_RESULTS',
+                    'STATE_VECTOR_SIZE', 'OUTPUT_VECTOR_SIZE', 'MIN_RESULTS',
                     'READ_ONLY', 'DROP_COLLECTION'
+                ],
+                'Noise Settings': [
+                    'NOISE_START', 'NOISE_END', 'NOISE_DECAY_RATE'
                 ],
                 'Trial Settings': [
                     'MAX_TRIAL_LENGTH', 'USE_HIT_POINTS', 'HIT_POINTS', 'METABOLIC_COST'
@@ -194,6 +235,10 @@ def save_settings_file(metrics: Dict[str, Any], output_dir: str):
                 ],
                 'Trial Success Multiplier': [
                     'TRIAL_SUCCESS_MULTIPLIER_SCALE'
+                ],
+                'Vector Store Settings': [
+                    'VECTOR_SAVE_RATE', 'DELETE_BEFORE_INSERT_STRATEGY',
+                    'SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD'
                 ]
             }
             

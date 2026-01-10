@@ -39,12 +39,14 @@ class Trainer:
             'successes': [],  # boolean list, reward >= 200
             'deaths': [],  # boolean list, hit points ran out
             'engram_distances': [],  # average distance per episode
-            'engram_counts': [],
+            'engram_counts': [],  # current count in database
+            'cumulative_engrams': [],  # total engrams added (ignores deletions)
             'action_distributions': [],  # list of dicts, one per episode
             'best_reward': -float('inf'),
             'rolling_average_50': [],
             'rolling_average_100': []
         }
+        self.total_engrams_added = 0  # Track cumulative engrams added
         
         # Initialize pygame window for action output display if enabled
         self.action_output_surface = None
@@ -205,8 +207,17 @@ class Trainer:
         episode_length = time_step + 1
         is_success = bool(total_reward >= 200)  # Ensure Python bool, not numpy bool
         
+        # Track engrams added this episode (before flush which may apply sampling)
+        engrams_queued = len(self.feedback_queue)
+        
         # Pass trial metadata to flush_feedback so it can be stored with engrams
         self.flush_feedback(total_reward, normalized_success, episode_length, is_success)
+        
+        # Update cumulative engram count (approximate based on VECTOR_SAVE_RATE)
+        from settings import VECTOR_SAVE_RATE
+        engrams_added = int(engrams_queued * VECTOR_SAVE_RATE)
+        self.total_engrams_added += engrams_added
+        
         # Filter out infinite distances before averaging
         valid_distances = [d for d in episode_distances if d != float('inf')]
         avg_distance = sum(valid_distances) / len(valid_distances) if valid_distances else float('inf')
@@ -226,6 +237,7 @@ class Trainer:
         self.metrics['deaths'].append(death_occurred)
         self.metrics['engram_distances'].append(avg_distance)
         self.metrics['engram_counts'].append(engram_count)
+        self.metrics['cumulative_engrams'].append(self.total_engrams_added)
         self.metrics['action_distributions'].append(action_distribution)
         
         # Update best reward
@@ -362,7 +374,9 @@ class Trainer:
             'DECAY_VALUE': settings.DECAY_VALUE,
             'TRIAL_SUCCESS_MULTIPLIER_SCALE': settings.TRIAL_SUCCESS_MULTIPLIER_SCALE,
             'VECTOR_COMPONENT_WEIGHTS': settings.VECTOR_COMPONENT_WEIGHTS,
-            'VECTOR_SAVE_RATE': settings.VECTOR_SAVE_RATE
+            'VECTOR_SAVE_RATE': settings.VECTOR_SAVE_RATE,
+            'DELETE_BEFORE_INSERT_STRATEGY': settings.DELETE_BEFORE_INSERT_STRATEGY,
+            'SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD': settings.SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD
         }
         
         # Prepare data for export
@@ -378,6 +392,7 @@ class Trainer:
                 'deaths': self.metrics['deaths'],
                 'engram_distances': self.metrics['engram_distances'],
                 'engram_counts': self.metrics['engram_counts'],
+                'cumulative_engrams': self.metrics['cumulative_engrams'],
                 'action_distributions': self.metrics['action_distributions'],
                 'best_reward': self.metrics['best_reward'],
                 'rolling_average_50': self.metrics['rolling_average_50'],
