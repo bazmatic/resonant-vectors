@@ -124,13 +124,24 @@ class EngramBrain:
         self.engram_store.insert(new_engram, trial_final_success)
     
     def batch_apply_feedback(self, inputs: List[list[float]], actions: List[int], outcomes: List[float], 
-                            success: float, trial_final_success: float = 0.0) -> None:
+                            success: float, trial_final_successes: List[float] = None) -> None:
         """
         Apply feedback for multiple observations in a batch for better performance.
         All inputs, actions, and outcomes should have the same length.
+        
+        Args:
+            inputs: List of observation vectors
+            actions: List of actions taken
+            outcomes: List of immediate rewards
+            success: Overall trial success (for tracking)
+            trial_final_successes: Per-step discounted credit values for temporal credit assignment
         """
         if len(inputs) == 0:
             return
+        
+        # Default to zeros if not provided
+        if trial_final_successes is None:
+            trial_final_successes = [0.0] * len(inputs)
         
         # Create engrams for all inputs, storing only the input state vector
         # Success is stored separately in trial_final_success field for scoring purposes
@@ -157,9 +168,7 @@ class EngramBrain:
             elif strategy == "Random":
                 self.engram_store.delete_random_records(num_to_delete)
         
-        # Batch insert all engrams at once
-        trial_final_successes = [trial_final_success] * len(engrams)
-        
+        # Batch insert all engrams with per-step discounted credits
         self.engram_store.batch_insert(engrams, trial_final_successes)
 
         

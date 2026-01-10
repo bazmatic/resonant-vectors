@@ -3,8 +3,8 @@ OUTPUT_VECTOR_SIZE = 4
 MIN_RESULTS = 400
 
 # Noise decay settings (noise decays over total episode, not individual trials)
-NOISE_START = 0.1      # Initial noise at start of training
-NOISE_END = 0.1       # Final noise level (asymptotic target)
+NOISE_START = 0.4      # Initial noise at start of training
+NOISE_END = 0.02       # Final noise level (asymptotic target)
 NOISE_DECAY_RATE = 3.0 # Controls speed of exponential decay (higher = faster decay)
 READ_ONLY = False
 DROP_COLLECTION = False
@@ -36,6 +36,13 @@ DECAY_VALUE = 0.9  # Score value at the scale distance
 # - Set to 0.0 to disable trial-based scoring
 TRIAL_SUCCESS_MULTIPLIER_SCALE = 0  # Controls strength of trial success multiplier on vector scores
 
+# Temporal discount factor for credit assignment
+# Controls how much credit earlier actions get for trial outcome
+# 1.0 = all steps get full credit (current behavior)
+# 0.99 = actions 100 steps before end get ~37% credit
+# 0.95 = actions 100 steps before end get ~0.6% credit
+CREDIT_DISCOUNT_GAMMA = 0.995
+
 # Vector component weightings
 # Weightings for each of the 8 input state vector components to control their relative importance
 # in similarity search calculations. Higher weights make components contribute more to distance.
@@ -66,12 +73,12 @@ VECTOR_SAVE_RATE = 0.25
 #   None: No deletion occurs (even after threshold)
 #   "Oldest": Delete oldest records first (based on insertion_index) after threshold
 #   "Random": Delete random records after threshold. This maintains a roughly constant collection size over time.
-DELETE_BEFORE_INSERT_STRATEGY = "Random"
+DELETE_BEFORE_INSERT_STRATEGY = "Oldest"
 
 # Threshold for enabling deletion before insert
 # No records will be deleted until the record count reaches this threshold.
 # After threshold is reached, DELETE_BEFORE_INSERT_STRATEGY determines which records to delete.
-SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD = 10000
+SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD = 100000
 
 # Training settings
-TRIALS_PER_EXPERIMENT = 1500  # Number of trials to run per training experiment
+TRIALS_PER_EXPERIMENT = 1000  # Number of trials to run per training experiment

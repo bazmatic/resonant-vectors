@@ -5,7 +5,7 @@ from faiss_store import FAISSEngramStore
 import numpy
 from WeightedResonatorFactory import WeightedResonatorFactory
 import settings
-from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS, TRIALS_PER_EXPERIMENT
+from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS, TRIALS_PER_EXPERIMENT, CREDIT_DISCOUNT_GAMMA
 from noise import calculate_base_noise
 import json
 from typing import Dict, List, Any
@@ -173,8 +173,8 @@ class Trainer:
             
             if READ_ONLY == False:
                 #print(f"Reward: {reward}")
-                # add time to observation array
-                self.queue_feedback(observation, action, reward)
+                # Queue feedback with step index for discounted credit assignment
+                self.queue_feedback(observation, action, reward, time_step)
                 #self.brain.apply_feedback(observation, action, reward)
 
             if USE_HIT_POINTS == True:
@@ -373,6 +373,7 @@ class Trainer:
             'DECAY_SCALE_IDS': settings.DECAY_SCALE_IDS,
             'DECAY_VALUE': settings.DECAY_VALUE,
             'TRIAL_SUCCESS_MULTIPLIER_SCALE': settings.TRIAL_SUCCESS_MULTIPLIER_SCALE,
+            'CREDIT_DISCOUNT_GAMMA': settings.CREDIT_DISCOUNT_GAMMA,
             'VECTOR_COMPONENT_WEIGHTS': settings.VECTOR_COMPONENT_WEIGHTS,
             'VECTOR_SAVE_RATE': settings.VECTOR_SAVE_RATE,
             'DELETE_BEFORE_INSERT_STRATEGY': settings.DELETE_BEFORE_INSERT_STRATEGY,
@@ -408,8 +409,8 @@ class Trainer:
         
         print(f"Metrics saved to {filename}")
     
-    def queue_feedback(self, observation: list[float], action: int, reward: float):
-        self.feedback_queue.append((observation, action, reward))
+    def queue_feedback(self, observation: list[float], action: int, reward: float, step_index: int):
+        self.feedback_queue.append((observation, action, reward, step_index))
     
     def flush_feedback(self, total_reward: float, normalized_success: float, episode_length: int, is_success: bool):
         if READ_ONLY == False:
@@ -432,13 +433,23 @@ class Trainer:
 
             # Batch insert all engrams from the queue for better performance
             if len(self.feedback_queue) > 0:
-                observations, actions, rewards = zip(*self.feedback_queue)
+                observations, actions, rewards, step_indices = zip(*self.feedback_queue)
+                
+                # Calculate per-step discounted credit assignment
+                # Actions closer to trial end receive more credit/blame
+                total_steps = len(self.feedback_queue)
+                discounted_credits = []
+                for step_index in step_indices:
+                    steps_to_end = total_steps - step_index - 1
+                    discounted_credit = normalized_success * (CREDIT_DISCOUNT_GAMMA ** steps_to_end)
+                    discounted_credits.append(discounted_credit)
+                
                 self.brain.batch_apply_feedback(
                     list(observations), 
                     list(actions), 
                     list(rewards), 
                     success, 
-                    normalized_success
+                    discounted_credits
                 )
             self.feedback_queue.clear()
     

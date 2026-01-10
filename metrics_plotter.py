@@ -234,7 +234,8 @@ def save_settings_file(metrics: Dict[str, Any], output_dir: str):
                     'DECAY_SCALE_IDS', 'DECAY_VALUE'
                 ],
                 'Trial Success Multiplier': [
-                    'TRIAL_SUCCESS_MULTIPLIER_SCALE'
+                    'TRIAL_SUCCESS_MULTIPLIER_SCALE',
+                    'CREDIT_DISCOUNT_GAMMA'
                 ],
                 'Vector Store Settings': [
                     'VECTOR_SAVE_RATE', 'DELETE_BEFORE_INSERT_STRATEGY',
