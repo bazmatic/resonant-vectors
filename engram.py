@@ -17,7 +17,6 @@ from settings import (
     DECAY_SCALE_IDS,
     DECAY_VALUE,
     VECTOR_SAVE_RATE,
-    DELETE_OLDEST_BEFORE_INSERT,
 )
 from typing import Dict, Optional, List, Tuple
 

@@ -1,6 +1,6 @@
 from engram import Engram, BaseEngramStore
 import numpy as np
-from settings import MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, DELETE_OLDEST_BEFORE_INSERT
+from settings import MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, DELETE_BEFORE_INSERT_STRATEGY, SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD
 from noise import calculate_noise
 from IResonatorFactory import IResonatorFactory
 from typing import List, Tuple
@@ -139,12 +139,23 @@ class EngramBrain:
             engram = Engram(vector=input_vec, action=action, outcome=outcome)
             engrams.append(engram)
         
-        # If enabled, delete oldest records before inserting new ones
-        if DELETE_OLDEST_BEFORE_INSERT:
+        # Determine deletion strategy
+        strategy = DELETE_BEFORE_INSERT_STRATEGY
+        
+        # No deletion occurs until threshold is reached
+        if strategy is not None:
+            current_count = self.engram_store.get_count()
+            if current_count < SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD:
+                # Before threshold is reached, don't delete anything
+                strategy = None
+        
+        # Delete records based on strategy before inserting new ones
+        if strategy is not None:
             num_to_delete = len(engrams)
-            deleted_count = self.engram_store.delete_oldest_records(num_to_delete+1)
-            if deleted_count > 0:
-                print(f"Deleted {deleted_count} oldest records before inserting {len(engrams)} new records")
+            if strategy == "Oldest":
+                self.engram_store.delete_oldest_records(num_to_delete)
+            elif strategy == "Random":
+                self.engram_store.delete_random_records(num_to_delete)
         
         # Batch insert all engrams at once
         trial_final_successes = [trial_final_success] * len(engrams)

@@ -1,11 +1,10 @@
 STATE_VECTOR_SIZE = 8
 OUTPUT_VECTOR_SIZE = 4
-NOISE = 0.05  # Legacy: base noise level (use NOISE_START/NOISE_END for decay)
 MIN_RESULTS = 400
 
 # Noise decay settings (noise decays over total episode, not individual trials)
-NOISE_START = 0.2      # Initial noise at start of training
-NOISE_END = 0.05       # Final noise level (asymptotic target)
+NOISE_START = 0.4      # Initial noise at start of training
+NOISE_END = 0.01       # Final noise level (asymptotic target)
 NOISE_DECAY_RATE = 3.0 # Controls speed of exponential decay (higher = faster decay)
 READ_ONLY = False
 DROP_COLLECTION = False
@@ -58,13 +57,21 @@ VECTOR_COMPONENT_WEIGHTS = [0.5, 1.4, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0]  # 8 weights
 # Vector sampling settings
 # Fraction of vectors to randomly sample and save (0.0 to 1.0)
 # 1.0 = save all vectors, 0.5 = save 50% randomly selected, 0.0 = save none
-VECTOR_SAVE_RATE = 0.2
+VECTOR_SAVE_RATE = 0.5
 
-# Delete oldest records before insert
-# If True, before inserting records via batch_apply_feedback, delete the same number
-# of oldest records first (based on insertion_index). This maintains a roughly constant
-# collection size over time.
-DELETE_OLDEST_BEFORE_INSERT = False
+# Delete before insert strategy
+# Controls whether and how records are deleted before inserting new ones.
+# No deletion occurs until SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD is reached.
+# Valid values:
+#   None: No deletion occurs (even after threshold)
+#   "Oldest": Delete oldest records first (based on insertion_index) after threshold
+#   "Random": Delete random records after threshold. This maintains a roughly constant collection size over time.
+DELETE_BEFORE_INSERT_STRATEGY = "Random"
+
+# Threshold for enabling deletion before insert
+# No records will be deleted until the record count reaches this threshold.
+# After threshold is reached, DELETE_BEFORE_INSERT_STRATEGY determines which records to delete.
+SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD = 40000
 
 # Training settings
 TRIALS_PER_EXPERIMENT = 2000  # Number of trials to run per training experiment

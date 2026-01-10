@@ -341,7 +341,9 @@ class Trainer:
         settings_dict = {
             'STATE_VECTOR_SIZE': settings.STATE_VECTOR_SIZE,
             'OUTPUT_VECTOR_SIZE': settings.OUTPUT_VECTOR_SIZE,
-            'NOISE': settings.NOISE,
+            'NOISE_START': settings.NOISE_START,
+            'NOISE_END': settings.NOISE_END,
+            'NOISE_DECAY_RATE': settings.NOISE_DECAY_RATE,
             'MIN_RESULTS': settings.MIN_RESULTS,
             'READ_ONLY': settings.READ_ONLY,
             'DROP_COLLECTION': settings.DROP_COLLECTION,
