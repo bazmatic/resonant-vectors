@@ -5,7 +5,7 @@ from engram import EngramStore
 import numpy
 from WeightedResonatorFactory import WeightedResonatorFactory
 import settings
-from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS, PAST_HISTORY_STEPS
+from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, PROBABILISTIC_CHOICE, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS
 import json
 from typing import Dict, List, Any
 import pygame
@@ -19,8 +19,8 @@ class Trainer:
         # Create the resonator factor and store
         self.resonator_factory = WeightedResonatorFactory(weights=VECTOR_COMPONENT_WEIGHTS)
         self.engram_store = EngramStore(instance_name, clear_collection)
-        # Create the brain (21 = 8 current obs + 8 past obs avg + 4 past action dist + 1 past reward avg)
-        self.brain = EngramBrain(21, 4, self.engram_store, self.resonator_factory)
+        # Create the brain
+        self.brain = EngramBrain(9, 4, self.engram_store, self.resonator_factory)
         if DISPLAY == True:
             render_mode = "human"
         else:
@@ -119,7 +119,7 @@ class Trainer:
     def trial(self):
         # Run one trial
         self.trial_count += 1
-        # print(f"Trial: {self.trial_count} ========================")
+        print(f"Trial: {self.trial_count} ========================")
         self.env.reset()
 
         hit_points = HIT_POINTS
@@ -131,14 +131,8 @@ class Trainer:
         # Track metrics for this episode
         episode_actions = []
         episode_distances = []
-        
-        # History buffer for past context (observation, action, reward) tuples
-        history_buffer: List[tuple] = []
 
         for time_step in range(MAX_TRIAL_LENGTH):
-            
-            # Calculate episode progress (0.0 at start, approaches 1.0 at end)
-            episode_progress = time_step / MAX_TRIAL_LENGTH
             
             # Calculate panic factor based on current hit points (if panic is enabled)
             panic_factor = 0.0
@@ -146,12 +140,8 @@ class Trainer:
                 # Calculate panic factor: 0.0 at full hit points, 1.0 at zero hit points
                 panic_factor = max(0.0, min(1.0, 1.0 - (hit_points / HIT_POINTS)))
             
-            # Compute past averages and extend observation with historical context
-            past_averages = self._compute_past_averages(history_buffer)
-            extended_observation = list(observation) + past_averages
-            
             # Get brain output with distance info for metrics
-            brain_output, distance = self.brain.decide(extended_observation, self.mean_success + 0.05, return_distance_info=True, panic_factor=panic_factor, episode_progress=episode_progress)
+            brain_output, distance = self.brain.decide(observation, self.mean_success + 0.05, return_distance_info=True, panic_factor=panic_factor)
             episode_distances.append(distance)
             
             # Draw action output if enabled
@@ -159,13 +149,18 @@ class Trainer:
                 self._draw_action_output(brain_output)
             
             normalised = [x - min(brain_output) for x in brain_output]
-            
-            # Ensure normalised has exactly 4 elements for LunarLander (4 actions)
-            if len(normalised) != 4:
-                normalised = normalised[:4] if len(normalised) > 4 else normalised + [0.0] * (4 - len(normalised))
 
-            # Select action with highest score (noise already provides exploration)
-            action = numpy.argmax(normalised)
+            if PROBABILISTIC_CHOICE == True:    
+                output_sum = sum(normalised)
+                if output_sum == 0.0:
+                    action = numpy.random.choice(numpy.arange(4))
+                else:                     
+                    probabilities = [x / output_sum for x in normalised]
+                    # Then choose one
+                    action = numpy.random.choice(numpy.arange(4), p=probabilities)
+
+            else:
+                action = numpy.argmax(normalised)
             
             # Track action
             episode_actions.append(action)
@@ -175,16 +170,10 @@ class Trainer:
 
             total_reward = total_reward + reward
             
-            # Update history buffer with the step data (using base 8-element observation)
-            history_buffer.append((list(observation), action, reward))
-            # Keep only the last N steps
-            if len(history_buffer) > PAST_HISTORY_STEPS:
-                history_buffer.pop(0)
-            
             if READ_ONLY == False:
                 #print(f"Reward: {reward}")
-                # Queue feedback with the extended observation (21 elements)
-                self.queue_feedback(extended_observation, action, reward)
+                # add time to observation array
+                self.queue_feedback(observation, action, reward)
                 #self.brain.apply_feedback(observation, action, reward)
 
             if USE_HIT_POINTS == True:
@@ -257,26 +246,10 @@ class Trainer:
         else:
             self.metrics['rolling_average_100'].append(sum(self.metrics['rewards']) / len(self.metrics['rewards']) if self.metrics['rewards'] else 0.0)
 
-        # print(f"*** Length of trial: {episode_length}")
-        # Calculate base noise based on trial progress (not episode progress within trial)
-        # This ensures noise monotonically decreases as training progresses
-        # Use trial count normalized by a reasonable expectation of total trials
-        # This gives a consistent noise level regardless of individual trial length
-        from settings import TRIALS_PER_EXPERIMENT
-        trial_progress = min(1.0, self.trial_count / TRIALS_PER_EXPERIMENT) if TRIALS_PER_EXPERIMENT > 0 else 0.0
-        
-        # Calculate and display base noise (without panic factor) based on trial progress
-        base_noise = EngramBrain.calculate_base_noise(trial_progress)
-        
-        # Show positive numbers as green for total_reward
-        GREEN = '\033[92m'
-        RESET = '\033[0m'
-        reward_str = f"{total_reward:.1f}"
-        if total_reward > 0:
-            reward_str = f"{GREEN}{reward_str}{RESET}"
-        print(f"*** Trial {self.trial_count} | Rolling Average: {self.metrics['rolling_average_100'][-1]:.1f} | Total reward: {reward_str} | Noise: {base_noise:.3f}")
-        # if death_occurred:
-        #     print(f"*** DEATH: Hit points exhausted")
+        print(f"*** Length of trial: {episode_length}")
+        print(f"*** Total reward: {total_reward}")
+        if death_occurred:
+            print(f"*** DEATH: Hit points exhausted")
 
 
         return total_reward
@@ -356,11 +329,7 @@ class Trainer:
         settings_dict = {
             'STATE_VECTOR_SIZE': settings.STATE_VECTOR_SIZE,
             'OUTPUT_VECTOR_SIZE': settings.OUTPUT_VECTOR_SIZE,
-            'PAST_HISTORY_STEPS': settings.PAST_HISTORY_STEPS,
-            'NOISE_START': settings.NOISE_START,
-            'NOISE_END': settings.NOISE_END,
-            'NOISE_DECAY_RATE': settings.NOISE_DECAY_RATE,
-            'NOISE': settings.NOISE,  # Backward compatibility
+            'NOISE': settings.NOISE,
             'MIN_RESULTS': settings.MIN_RESULTS,
             'READ_ONLY': settings.READ_ONLY,
             'DROP_COLLECTION': settings.DROP_COLLECTION,
@@ -370,6 +339,7 @@ class Trainer:
             'METABOLIC_COST': settings.METABOLIC_COST,
             'PANIC_ENABLED': settings.PANIC_ENABLED,
             'PANIC_MAX_NOISE': settings.PANIC_MAX_NOISE,
+            'PROBABILISTIC_CHOICE': settings.PROBABILISTIC_CHOICE,
             'DISPLAY': settings.DISPLAY,
             'SHOW_ACTION_OUTPUT': settings.SHOW_ACTION_OUTPUT,
             'DECAY_ENABLED': settings.DECAY_ENABLED,
@@ -443,43 +413,6 @@ class Trainer:
                     normalized_success
                 )
             self.feedback_queue.clear()
-    
-    def _compute_past_averages(self, history_buffer: List[tuple]) -> List[float]:
-        """
-        Compute rolling averages of past observations, actions, and rewards.
-        
-        Args:
-            history_buffer: List of (observation, action, reward) tuples from recent steps
-            
-        Returns:
-            13-element list containing:
-            - [0-7]: Average of each observation component over last N steps
-            - [8-11]: Action distribution (proportion of each action 0-3)
-            - [12]: Average reward over last N steps
-        """
-        if len(history_buffer) == 0:
-            # No history yet - return zeros
-            return [0.0] * 13
-        
-        # Compute average of observations (8 components)
-        obs_sums = [0.0] * 8
-        for obs, _, _ in history_buffer:
-            for i in range(8):
-                obs_sums[i] += obs[i]
-        obs_avgs = [s / len(history_buffer) for s in obs_sums]
-        
-        # Compute action distribution (4 values)
-        action_counts = [0, 0, 0, 0]
-        for _, action, _ in history_buffer:
-            action_counts[action] += 1
-        action_dist = [c / len(history_buffer) for c in action_counts]
-        
-        # Compute average reward (1 value)
-        reward_sum = sum(reward for _, _, reward in history_buffer)
-        reward_avg = reward_sum / len(history_buffer)
-        
-        # Combine all: 8 obs avgs + 4 action dist + 1 reward avg = 13 values
-        return obs_avgs + action_dist + [reward_avg]
     
     def _value_to_color(self, value: float) -> tuple[int, int, int]:
         """

@@ -5,15 +5,6 @@
 
 set -e  # Exit on error
 
-# Get the script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-
-# Activate virtual environment if it exists
-if [ -d "venv" ]; then
-    source venv/bin/activate
-fi
-
 # Check if experiment name is provided
 if [ -z "$1" ]; then
     echo "Error: Experiment name is required"

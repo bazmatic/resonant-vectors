@@ -176,8 +176,7 @@ def save_settings_file(metrics: Dict[str, Any], output_dir: str):
             # Group settings by category
             categories = {
                 'Core Settings': [
-                    'STATE_VECTOR_SIZE', 'OUTPUT_VECTOR_SIZE', 'NOISE_START', 'NOISE_END', 
-                    'NOISE_DECAY_RATE', 'NOISE', 'MIN_RESULTS',
+                    'STATE_VECTOR_SIZE', 'OUTPUT_VECTOR_SIZE', 'NOISE', 'MIN_RESULTS',
                     'READ_ONLY', 'DROP_COLLECTION'
                 ],
                 'Trial Settings': [

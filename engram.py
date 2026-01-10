@@ -1,5 +1,12 @@
 import numpy as np
-from abc import ABC, abstractmethod
+from pymilvus import (
+    connections,
+    utility,
+    FieldSchema, CollectionSchema, DataType,
+    Collection,
+    Function,
+    FunctionType,
+)
 from settings import (
     STATE_VECTOR_SIZE, 
     OUTPUT_VECTOR_SIZE,
@@ -9,33 +16,9 @@ from settings import (
     DECAY_SCALE_IDS,
     DECAY_VALUE,
     VECTOR_SAVE_RATE,
+    DELETE_OLDEST_BEFORE_INSERT,
 )
-from typing import Dict, Optional, List, Tuple
-
-# Import Milvus only when needed
-try:
-    from pymilvus import (
-        connections,
-        utility,
-        FieldSchema, CollectionSchema, DataType,
-        Collection,
-        Function,
-        FunctionType,
-    )
-    MILVUS_AVAILABLE = True
-except ImportError:
-    MILVUS_AVAILABLE = False
-    # Create dummy classes for type hints when Milvus is not available
-    class Function:
-        pass
-    class CollectionSchema:
-        pass
-    class FieldSchema:
-        pass
-    class DataType:
-        pass
-    class Collection:
-        pass
+from typing import Dict, Optional, List
 
 class Engram:
     def __init__(
@@ -79,59 +62,12 @@ class EngramField:
     outcome = "outcome"
     trial_final_success = "trial_final_success"
 
-class BaseEngramStore(ABC):
-    """Abstract base class for vector store implementations."""
-    
-    @abstractmethod
-    def insert(self, record: 'Engram', trial_final_success: float = 0.0) -> None:
-        """Insert a single engram record."""
-        pass
-    
-    @abstractmethod
-    def batch_insert(self, records: List['Engram'], trial_final_successes: List[float] = None) -> None:
-        """Insert multiple engram records in a batch."""
-        pass
-    
-    @abstractmethod
-    def nearest(self, vector: list[float], limit: int) -> List[Tuple['Engram', float]]:
-        """Find nearest engrams to the given vector. Returns list of (Engram, distance) tuples."""
-        pass
-    
-    @abstractmethod
-    def get_count(self) -> int:
-        """Return the total number of engrams in the store."""
-        pass
-    
-    @abstractmethod
-    def get_outcome_stats(self, sample_size: int = 1000) -> Dict[str, float]:
-        """Sample engrams and return outcome distribution statistics."""
-        pass
-    
-    @abstractmethod
-    def delete_oldest_records(self, count: int) -> int:
-        """Delete the N oldest records based on insertion_index. Returns number deleted."""
-        pass
-    
-    @abstractmethod
-    def delete_random_records(self, count: int) -> int:
-        """Delete N randomly selected records. Returns number deleted."""
-        pass
-
-class MilvusEngramStore(BaseEngramStore):
-    """Milvus-based vector store implementation."""
-    
-    if not MILVUS_AVAILABLE:
-        def __init__(self, *args, **kwargs):
-            raise ImportError("pymilvus is not installed. Install it with: pip install pymilvus")
+class EngramStore:
 
 
     # static method
     @staticmethod
     def schema():
-        try:
-            from pymilvus import FieldSchema, CollectionSchema, DataType
-        except ImportError:
-            raise ImportError("pymilvus is not installed. Install it with: pip install pymilvus")
         fields = [
             FieldSchema(name=EngramField.id, dtype=DataType.INT64, is_primary=True, auto_id=True),
             FieldSchema(name=EngramField.insertion_index, dtype=DataType.INT64, description='Sequential insertion index for decay ranking'),
@@ -154,10 +90,6 @@ class MilvusEngramStore(BaseEngramStore):
         #self.collection=Collection(name=self.collection_name)
 
     def connect_to_db(self, reset:bool = False):
-        try:
-            from pymilvus import connections, utility
-        except ImportError:
-            raise ImportError("pymilvus is not installed. Install it with: pip install pymilvus")
         connections.connect(alias="default") 
         if reset and utility.has_collection(self.collection_name):
             print(f"Dropping collection {self.collection_name}")
@@ -186,10 +118,6 @@ class MilvusEngramStore(BaseEngramStore):
 
 
     def make_collection(self):
-        try:
-            from pymilvus import Collection
-        except ImportError:
-            raise ImportError("pymilvus is not installed. Install it with: pip install pymilvus")
         self.collection=Collection(name=self.collection_name, schema=self.schema())
         index = {
             "index_type": "IVF_FLAT", # Inverted File Flat: balanced between memory and speed
@@ -299,7 +227,7 @@ class MilvusEngramStore(BaseEngramStore):
         # Use the counter which tracks the max index
         return self._insertion_counter
 
-    def _create_decay_ranker(self):
+    def _create_decay_ranker(self) -> Optional[Function]:
         """Create a decay ranker function based on current settings and collection state."""
         if not DECAY_ENABLED:
             return None
@@ -532,137 +460,10 @@ class MilvusEngramStore(BaseEngramStore):
         self._cached_count = None
         
         return total_deleted
-    
-    def delete_random_records(self, count: int) -> int:
-        """
-        Delete N randomly selected records from the collection.
-        Returns the number of records actually deleted.
-        """
-        if count <= 0:
-            return 0
-        
-        self._ensure_loaded()
-        
-        # Get total count to check if we have enough records
-        total_count = self.get_count()
-        if total_count == 0:
-            return 0
-        
-        # If we have fewer records than requested, delete all existing records
-        records_to_delete = min(count, total_count)
-        
-        # Use random vector search to find random records
-        # Generate random query vectors and collect unique records
-        import random
-        all_results = []
-        seen_ids = set()
-        max_attempts = 100  # Limit attempts to avoid infinite loop
-        attempts = 0
-        
-        search_params = {
-            "metric_type": "L2",
-            "params": {"nprobe": 8}
-        }
-        
-        # Keep searching with random vectors until we have enough unique records
-        while len(all_results) < records_to_delete and attempts < max_attempts:
-            # Generate random query vector
-            random_vector = [[random.uniform(-1, 1) for _ in range(STATE_VECTOR_SIZE)]]
-            
-            # Search for nearest vectors (this gives us a somewhat random sample)
-            search_results = self.collection.search(
-                data=random_vector,
-                limit=min(records_to_delete * 2, 100),  # Get more than needed for randomness
-                param=search_params,
-                anns_field=EngramField.vector,
-                output_fields=[EngramField.id]
-            )
-            
-            # Add unique records to our collection
-            for record in search_results[0]:
-                record_id = record.fields[EngramField.id]
-                if record_id not in seen_ids:
-                    seen_ids.add(record_id)
-                    all_results.append(record_id)
-                    if len(all_results) >= records_to_delete:
-                        break
-            
-            attempts += 1
-        
-        # If we still don't have enough, fall back to querying all IDs and randomly selecting
-        if len(all_results) < records_to_delete:
-            # Query all records for their IDs
-            all_ids_results = self.collection.query(
-                expr="",
-                output_fields=[EngramField.id],
-                limit=16384  # Milvus max
-            )
-            
-            all_ids = [record[EngramField.id] for record in all_ids_results]
-            
-            # If we got some from random search, remove those from consideration
-            candidate_ids = [id for id in all_ids if id not in seen_ids]
-            
-            # Randomly sample from remaining IDs
-            needed = records_to_delete - len(all_results)
-            if len(candidate_ids) > 0:
-                selected_ids = random.sample(candidate_ids, min(needed, len(candidate_ids)))
-                all_results.extend(selected_ids)
-        
-        # Take only the number we need
-        ids_to_delete = all_results[:records_to_delete]
-        
-        if len(ids_to_delete) == 0:
-            return 0
-        
-        # Delete in batches if we have too many IDs (to avoid expression length limits)
-        BATCH_SIZE = 1000  # Conservative batch size for delete expressions
-        total_deleted = 0
-        
-        for i in range(0, len(ids_to_delete), BATCH_SIZE):
-            batch_ids = ids_to_delete[i:i + BATCH_SIZE]
-            id_list_str = ",".join(str(id) for id in batch_ids)
-            delete_expr = f"{EngramField.id} in [{id_list_str}]"
-            self.collection.delete(delete_expr)
-            total_deleted += len(batch_ids)
-        
-        # Flush to ensure deletion is persisted
-        self.collection.flush()
-        
-        # Invalidate cached count
-        self._cached_count = None
-        
-        return total_deleted
 
-def create_engram_store(name: str = "lander", reset: bool = False) -> BaseEngramStore:
-    """
-    Factory function to create an EngramStore instance based on VECTOR_STORE_TYPE setting.
-    
-    Args:
-        name: Name for the store instance
-        reset: Whether to reset/clear existing data
-        
-    Returns:
-        BaseEngramStore instance (either MilvusEngramStore or FAISSEngramStore)
-    """
-    from settings import VECTOR_STORE_TYPE
-    
-    if VECTOR_STORE_TYPE == "faiss":
-        from faiss_store import FAISSEngramStore
-        return FAISSEngramStore(name, reset)
-    elif VECTOR_STORE_TYPE == "milvus":
-        return MilvusEngramStore(name, reset)
-    else:
-        raise ValueError(f"Unknown VECTOR_STORE_TYPE: {VECTOR_STORE_TYPE}. Must be 'milvus' or 'faiss'")
-
-# Backward compatibility: EngramStore class that delegates to factory
-class EngramStore:
-    """Backward compatibility wrapper that creates the appropriate store type based on settings."""
-    def __new__(cls, name: str = "lander", reset: bool = False):
-        return create_engram_store(name, reset)
-
+   
 def test():
-    store = create_engram_store()
+    store = EngramStore()
     akash = Engram(id=1, vector=[1.0, 2.0, 3.0], action=1, outcome=1.0)
     store.insert(akash)
     store.insert(Engram(id=2, vector=[-0.101, 0.001, 0.993], action=1, outcome=-1.0))
