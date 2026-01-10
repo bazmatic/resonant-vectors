@@ -1,11 +1,12 @@
 
 import gymnasium as gym
 from EngramBrain import EngramBrain
-from engram import EngramStore
+from faiss_store import FAISSEngramStore
 import numpy
 from WeightedResonatorFactory import WeightedResonatorFactory
 import settings
-from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS
+from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS, TRIALS_PER_EXPERIMENT
+from noise import calculate_base_noise
 import json
 from typing import Dict, List, Any
 import pygame
@@ -17,9 +18,9 @@ class Trainer:
         self.total_trials = 0  # Set when train() is called
         self.clear_collection = clear_collection
         self.instance_name = instance_name
-        # Create the resonator factor and store
+        # Create the resonator factor and store (using in-memory FAISS store)
         self.resonator_factory = WeightedResonatorFactory(weights=VECTOR_COMPONENT_WEIGHTS)
-        self.engram_store = EngramStore(instance_name, clear_collection)
+        self.engram_store = FAISSEngramStore(instance_name, clear_collection)
         # Create the brain
         self.brain = EngramBrain(9, 4, self.engram_store, self.resonator_factory)
         if DISPLAY == True:
@@ -121,7 +122,6 @@ class Trainer:
     def trial(self):
         # Run one trial
         self.trial_count += 1
-        print(f"Trial: {self.trial_count} ========================")
         self.env.reset()
 
         hit_points = HIT_POINTS
@@ -245,11 +245,24 @@ class Trainer:
         else:
             self.metrics['rolling_average_100'].append(sum(self.metrics['rewards']) / len(self.metrics['rewards']) if self.metrics['rewards'] else 0.0)
 
-        print(f"*** Length of trial: {episode_length}")
-        print(f"*** Total reward: {total_reward}")
-        if death_occurred:
-            print(f"*** DEATH: Hit points exhausted")
-
+        # Calculate base noise based on trial progress for display
+        trial_progress = min(1.0, self.trial_count / TRIALS_PER_EXPERIMENT) if TRIALS_PER_EXPERIMENT > 0 else 0.0
+        base_noise = calculate_base_noise(trial_progress)
+        
+        # Show positive rewards as green, negative as red
+        GREEN = '\033[92m'
+        RED = '\033[91m'
+        RESET = '\033[0m'
+        reward_str = f"{total_reward:.1f}"
+        if total_reward > 0:
+            reward_str = f"{GREEN}{reward_str}{RESET}"
+        elif total_reward < -100:
+            reward_str = f"{RED}{reward_str}{RESET}"
+        
+        # Death indicator
+        death_str = f" {RED}💀{RESET}" if death_occurred else ""
+        
+        print(f"Trial {self.trial_count} | Reward: {reward_str} | Rolling: {self.metrics['rolling_average_100'][-1]:.1f} | Noise: {base_noise:.3f} | Engrams: {engram_count}{death_str}")
 
         return total_reward
     

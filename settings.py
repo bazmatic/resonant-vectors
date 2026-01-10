@@ -67,4 +67,4 @@ VECTOR_SAVE_RATE = 0.2
 DELETE_OLDEST_BEFORE_INSERT = False
 
 # Training settings
-TRIALS_PER_EXPERIMENT = 500  # Number of trials to run per training experiment
+TRIALS_PER_EXPERIMENT = 2000  # Number of trials to run per training experiment
