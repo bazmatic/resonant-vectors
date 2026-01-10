@@ -1,7 +1,12 @@
 STATE_VECTOR_SIZE = 8
 OUTPUT_VECTOR_SIZE = 4
-NOISE = 0.05
+NOISE = 0.05  # Legacy: base noise level (use NOISE_START/NOISE_END for decay)
 MIN_RESULTS = 400
+
+# Noise decay settings (noise decays over total episode, not individual trials)
+NOISE_START = 0.2      # Initial noise at start of training
+NOISE_END = 0.05       # Final noise level (asymptotic target)
+NOISE_DECAY_RATE = 3.0 # Controls speed of exponential decay (higher = faster decay)
 READ_ONLY = False
 DROP_COLLECTION = False
 USE_HIT_POINTS = True
@@ -13,7 +18,6 @@ METABOLIC_COST = 0.2
 PANIC_ENABLED = False
 PANIC_MAX_NOISE = 1
 
-PROBABILISTIC_CHOICE = False
 DISPLAY = False
 SHOW_ACTION_OUTPUT = False
 

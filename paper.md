@@ -126,11 +126,7 @@ Training proceeds through a series of trials on the LunarLander-v2 environment f
 
 4. **Action Scoring**: For each possible action (0-3), the system calculates a score by averaging the outcomes of all retrieved engrams that recommended that action. Actions with no supporting engrams receive a score of zero.
 
-5. **Action Selection**: The action scores are normalized (by subtracting the minimum score) and either:
-   - Selected deterministically using argmax (the highest-scoring action), or
-   - Selected probabilistically with probabilities proportional to the normalized scores
-   
-   Gaussian noise (standard deviation 0.1) is added to the scores before selection to encourage exploration.
+5. **Action Selection**: The action scores are normalized (by subtracting the minimum score) and selected deterministically using argmax (the highest-scoring action). Gaussian noise is added to the scores before selection to encourage exploration.
 
 6. **Environment Step**: The selected action is executed in the environment, producing a new observation and reward.
 

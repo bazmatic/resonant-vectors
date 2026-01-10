@@ -5,7 +5,7 @@ from engram import EngramStore
 import numpy
 from WeightedResonatorFactory import WeightedResonatorFactory
 import settings
-from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, PROBABILISTIC_CHOICE, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS
+from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS
 import json
 from typing import Dict, List, Any
 import pygame
@@ -14,6 +14,7 @@ class Trainer:
     # constructor
     def __init__(self, instance_name: str, clear_collection: bool = True):
         self.trial_count = 0
+        self.total_trials = 0  # Set when train() is called
         self.clear_collection = clear_collection
         self.instance_name = instance_name
         # Create the resonator factor and store
@@ -81,6 +82,7 @@ class Trainer:
         print(f"Training {self.instance_name}")
         # Create the environment
         
+        self.total_trials = trials  # Store for episode_progress calculation
         total_reward = 0.0
         for trial_num in range(trials):
             total_reward += self.trial()
@@ -132,6 +134,10 @@ class Trainer:
         episode_actions = []
         episode_distances = []
 
+        # Calculate episode progress (across all trials, not within this trial)
+        # This is used for noise decay: higher progress = less exploration noise
+        episode_progress = self.trial_count / self.total_trials if self.total_trials > 0 else 0.0
+        
         for time_step in range(MAX_TRIAL_LENGTH):
             
             # Calculate panic factor based on current hit points (if panic is enabled)
@@ -141,7 +147,11 @@ class Trainer:
                 panic_factor = max(0.0, min(1.0, 1.0 - (hit_points / HIT_POINTS)))
             
             # Get brain output with distance info for metrics
-            brain_output, distance = self.brain.decide(observation, self.mean_success + 0.05, return_distance_info=True, panic_factor=panic_factor)
+            brain_output, distance = self.brain.decide(
+                observation, self.mean_success + 0.05, 
+                return_distance_info=True, panic_factor=panic_factor,
+                episode_progress=episode_progress
+            )
             episode_distances.append(distance)
             
             # Draw action output if enabled
@@ -149,18 +159,7 @@ class Trainer:
                 self._draw_action_output(brain_output)
             
             normalised = [x - min(brain_output) for x in brain_output]
-
-            if PROBABILISTIC_CHOICE == True:    
-                output_sum = sum(normalised)
-                if output_sum == 0.0:
-                    action = numpy.random.choice(numpy.arange(4))
-                else:                     
-                    probabilities = [x / output_sum for x in normalised]
-                    # Then choose one
-                    action = numpy.random.choice(numpy.arange(4), p=probabilities)
-
-            else:
-                action = numpy.argmax(normalised)
+            action = numpy.argmax(normalised)
             
             # Track action
             episode_actions.append(action)
@@ -339,7 +338,6 @@ class Trainer:
             'METABOLIC_COST': settings.METABOLIC_COST,
             'PANIC_ENABLED': settings.PANIC_ENABLED,
             'PANIC_MAX_NOISE': settings.PANIC_MAX_NOISE,
-            'PROBABILISTIC_CHOICE': settings.PROBABILISTIC_CHOICE,
             'DISPLAY': settings.DISPLAY,
             'SHOW_ACTION_OUTPUT': settings.SHOW_ACTION_OUTPUT,
             'DECAY_ENABLED': settings.DECAY_ENABLED,

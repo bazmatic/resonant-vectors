@@ -113,7 +113,6 @@ Edit `settings.py` to customize behavior:
 - `MAX_TRIAL_LENGTH`: Maximum steps per trial (default: 400)
 - `METABOLIC_COST`: Energy cost per step when using hit points (default: 0.2)
 - `DISPLAY`: Show the environment visualization (default: True)
-- `PROBABILISTIC_CHOICE`: Use probabilistic action selection vs. argmax (default: False)
 - `READ_ONLY`: Disable learning/engram storage (default: False)
 - `DROP_COLLECTION`: Drop collection on initialization (default: True)
 

@@ -186,7 +186,7 @@ def save_settings_file(metrics: Dict[str, Any], output_dir: str):
                     'PANIC_ENABLED', 'PANIC_MAX_NOISE'
                 ],
                 'Action Selection': [
-                    'PROBABILISTIC_CHOICE', 'DISPLAY', 'SHOW_ACTION_OUTPUT'
+                    'DISPLAY', 'SHOW_ACTION_OUTPUT'
                 ],
                 'Decay Ranker Settings': [
                     'DECAY_ENABLED', 'DECAY_FUNCTION', 'DECAY_OFFSET_IDS',

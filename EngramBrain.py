@@ -1,6 +1,7 @@
 from engram import Engram, EngramStore
 import numpy as np
-from settings import NOISE, MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, PANIC_MAX_NOISE, DELETE_OLDEST_BEFORE_INSERT
+from settings import MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, DELETE_OLDEST_BEFORE_INSERT
+from noise import calculate_noise
 from IResonatorFactory import IResonatorFactory
 from typing import List, Tuple
 
@@ -16,11 +17,12 @@ class EngramBrain:
         self.resonator_factory = resonator_factory
 
     # Given an input, generate an output
-    def decide(self, input: np.ndarray, success: float, return_distance_info: bool = False, panic_factor: float = 0.0):
+    def decide(self, input: np.ndarray, success: float, return_distance_info: bool = False, 
+               panic_factor: float = 0.0, episode_progress: float = 0.0):
         resonator = self.input_to_resonator(input, success)
         resonating_engrams = self.get_resonating_engrams(resonator, MIN_RESULTS)
         scored_ngrams = self.score_engrams(resonating_engrams)
-        output = self.make_output(input, scored_ngrams, panic_factor)
+        output = self.make_output(input, scored_ngrams, panic_factor, episode_progress)
         
         if return_distance_info:
             # Calculate average distance of retrieved engrams
@@ -62,7 +64,8 @@ class EngramBrain:
         result.sort(key=lambda x: x[1], reverse=True)   
         return result
     
-    def make_output(self, input: list[float], scored_engrams: list[tuple], panic_factor: float = 0.0) -> list[float]:
+    def make_output(self, input: list[float], scored_engrams: list[tuple], 
+                    panic_factor: float = 0.0, episode_progress: float = 0.0) -> list[float]:
         # Return a vector of length output_size (Engram.action)
         # Different algorithms could go here, such as a neural network, which could take into account the scary low-scoring engrams too.
         # Scores are weighted by distance: closer engrams have more influence.
@@ -105,12 +108,8 @@ class EngramBrain:
                 where=action_total_weights!=0
             )
 
-            # Calculate dynamic noise based on panic factor (exponential scaling)
-            if panic_factor > 0.0:
-                # Exponential scaling: noise = NOISE * (PANIC_MAX_NOISE / NOISE) ** panic_factor
-                noise = NOISE * (PANIC_MAX_NOISE / NOISE) ** panic_factor
-            else:
-                noise = NOISE
+            # Calculate noise using centralized helper (decays over total episode, not individual trials)
+            noise = calculate_noise(episode_progress, panic_factor)
             
             action_scores = action_scores + np.random.normal(0, noise, self.output_size)
 
