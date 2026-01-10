@@ -8,6 +8,7 @@ cloudpickle==3.0.0
 environs==9.5.0
 Farama-Notifications==0.0.4
 grpcio==1.58.0
+faiss-cpu>=1.7.4
 gymnasium==0.29.1
 idna==3.8
 marshmallow==3.22.0

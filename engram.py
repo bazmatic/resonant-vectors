@@ -1,4 +1,5 @@
 import numpy as np
+from abc import ABC, abstractmethod
 from pymilvus import (
     connections,
     utility,
@@ -18,7 +19,7 @@ from settings import (
     VECTOR_SAVE_RATE,
     DELETE_OLDEST_BEFORE_INSERT,
 )
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 class Engram:
     def __init__(
@@ -62,7 +63,42 @@ class EngramField:
     outcome = "outcome"
     trial_final_success = "trial_final_success"
 
-class EngramStore:
+
+class BaseEngramStore(ABC):
+    """Abstract base class for engram stores."""
+    
+    @abstractmethod
+    def insert(self, record: 'Engram', trial_final_success: float = 0.0) -> None:
+        """Insert a single engram record."""
+        pass
+    
+    @abstractmethod
+    def batch_insert(self, records: List['Engram'], trial_final_successes: List[float] = None) -> None:
+        """Insert multiple engrams in a single batch operation."""
+        pass
+    
+    @abstractmethod
+    def nearest(self, vector: list[float], limit: int) -> List[Tuple['Engram', float]]:
+        """Find nearest engrams to the given vector."""
+        pass
+    
+    @abstractmethod
+    def get_count(self) -> int:
+        """Return the total number of engrams in the store."""
+        pass
+    
+    @abstractmethod
+    def get_outcome_stats(self, sample_size: int = 1000) -> Dict[str, float]:
+        """Sample engrams and return outcome distribution statistics."""
+        pass
+    
+    @abstractmethod
+    def delete_oldest_records(self, count: int) -> int:
+        """Delete the N oldest records based on insertion_index."""
+        pass
+
+
+class EngramStore(BaseEngramStore):
 
 
     # static method

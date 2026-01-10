@@ -1,4 +1,4 @@
-from engram import Engram, EngramStore
+from engram import Engram, BaseEngramStore
 import numpy as np
 from settings import MIN_RESULTS, TRIAL_SUCCESS_MULTIPLIER_SCALE, DELETE_OLDEST_BEFORE_INSERT
 from noise import calculate_noise
@@ -10,7 +10,7 @@ from typing import List, Tuple
 
 class EngramBrain:
 
-    def __init__(self, input_size: int, output_size: int, engram_store: EngramStore, resonator_factory: IResonatorFactory) -> None:
+    def __init__(self, input_size: int, output_size: int, engram_store: BaseEngramStore, resonator_factory: IResonatorFactory) -> None:
         self.input_size = input_size
         self.output_size = output_size
         self.engram_store = engram_store
