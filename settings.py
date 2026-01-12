@@ -1,24 +1,25 @@
 STATE_VECTOR_SIZE = 8
 OUTPUT_VECTOR_SIZE = 4
-MIN_RESULTS = 400
+MIN_RESULTS = 400  # Back to W4 baseline
 
 # Noise decay settings (noise decays over total episode, not individual trials)
-NOISE_START = 0.4      # Initial noise at start of training
-NOISE_END = 0.02       # Final noise level (asymptotic target)
-NOISE_DECAY_RATE = 3.0 # Controls speed of exponential decay (higher = faster decay)
+NOISE_START = 0.4      # Back to W4 baseline
+NOISE_END = 0.02       # Back to W4 baseline
+NOISE_DECAY_RATE = 3 # W4 baseline
 READ_ONLY = False
 DROP_COLLECTION = False
 USE_HIT_POINTS = True
 HIT_POINTS = 500
-MAX_TRIAL_LENGTH = 400
-METABOLIC_COST = 0.2
+MAX_TRIAL_LENGTH = 300
+METABOLIC_COST = 0.6  # Increased from 0.2 to penalize long episodes and encourage faster landings
 
 # Panic feature settings
-PANIC_ENABLED = False
+PANIC_ENABLED = True
 PANIC_MAX_NOISE = 1
 
 DISPLAY = False
 SHOW_ACTION_OUTPUT = False
+DEMO_AFTER_TRAINING = False  # Run visual demo trials after training completes
 
 # Decay ranker settings for order-based ranking
 DECAY_ENABLED = False
@@ -34,14 +35,14 @@ DECAY_VALUE = 0.9  # Score value at the scale distance
 # - With scale=0.5: best trials multiply scores by 1.5, worst by 0.5
 # - With scale=1.0: best trials multiply scores by 2.0, worst by 0.0
 # - Set to 0.0 to disable trial-based scoring
-TRIAL_SUCCESS_MULTIPLIER_SCALE = 0  # Controls strength of trial success multiplier on vector scores
+TRIAL_SUCCESS_MULTIPLIER_SCALE = 0
 
 # Temporal discount factor for credit assignment
 # Controls how much credit earlier actions get for trial outcome
 # 1.0 = all steps get full credit (current behavior)
 # 0.99 = actions 100 steps before end get ~37% credit
 # 0.95 = actions 100 steps before end get ~0.6% credit
-CREDIT_DISCOUNT_GAMMA = 0.995
+CREDIT_DISCOUNT_GAMMA = 0.995 
 
 # Vector component weightings
 # Weightings for each of the 8 input state vector components to control their relative importance
@@ -56,10 +57,7 @@ CREDIT_DISCOUNT_GAMMA = 0.995
 #   [5]: angular velocity (rotation rate,)
 #   [6]: leg contact 1 (boolean, set to 0)
 #   [7]: leg contact 2 (boolean, set to 0)
-#0.6, 1.4, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0
-#0.5, 1.4, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0
-# VECTOR_COMPONENT_WEIGHTS = [0.3, 1.4, 1, 1.2, 1.2, 1.0, 1.0, 1.0]  # 8 weights, one per input component
-VECTOR_COMPONENT_WEIGHTS = [0.5, 1.4, 1.0, 1.0, 2.0, 1.0, 0.5, 1.0]  # 8 weights, one per input component
+VECTOR_COMPONENT_WEIGHTS = [0.99, 1.22, 0.15, 2.23, 2.33, 0.11, 2.44, 0.96]
 
 # Vector sampling settings
 # Fraction of vectors to randomly sample and save (0.0 to 1.0)
@@ -73,12 +71,14 @@ VECTOR_SAVE_RATE = 0.25
 #   None: No deletion occurs (even after threshold)
 #   "Oldest": Delete oldest records first (based on insertion_index) after threshold
 #   "Random": Delete random records after threshold. This maintains a roughly constant collection size over time.
-DELETE_BEFORE_INSERT_STRATEGY = "Oldest"
+#   "LowestScore": Delete records with lowest outcome scores. Keeps better experiences while maintaining diversity.
+#   "SmallestAbsoluteReward": Delete records with outcomes closest to zero. Preserves strong positive and negative signals while removing neutral/weak signals.
+DELETE_BEFORE_INSERT_STRATEGY = "SmallestAbsoluteReward"  
 
 # Threshold for enabling deletion before insert
 # No records will be deleted until the record count reaches this threshold.
 # After threshold is reached, DELETE_BEFORE_INSERT_STRATEGY determines which records to delete.
-SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD = 100000
+SWITCH_TO_DELETE_BEFORE_INSERT_THRESHOLD = 40000  # Lower threshold to activate diversity maintenance earlier
 
 # Training settings
-TRIALS_PER_EXPERIMENT = 1000  # Number of trials to run per training experiment
+TRIALS_PER_EXPERIMENT = 2000  # Standard training length

@@ -167,6 +167,10 @@ class EngramBrain:
                 self.engram_store.delete_oldest_records(num_to_delete)
             elif strategy == "Random":
                 self.engram_store.delete_random_records(num_to_delete)
+            elif strategy == "LowestScore":
+                self.engram_store.delete_lowest_score_records(num_to_delete)
+            elif strategy == "SmallestAbsoluteReward":
+                self.engram_store.delete_smallest_absolute_reward_records(num_to_delete)
         
         # Batch insert all engrams with per-step discounted credits
         self.engram_store.batch_insert(engrams, trial_final_successes)

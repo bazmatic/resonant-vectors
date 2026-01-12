@@ -18,6 +18,7 @@ venv/
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints
 
+training_metrics*.json
 # pyenv
 .python-version
 

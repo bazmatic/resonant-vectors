@@ -332,6 +332,112 @@ class FAISSEngramStore(BaseEngramStore):
         
         return records_to_delete
     
+    def delete_lowest_score_records(self, count: int) -> int:
+        """Delete N records with the lowest outcome scores."""
+        if count <= 0:
+            return 0
+        
+        total_count = self.get_count()
+        if total_count == 0:
+            return 0
+        
+        records_to_delete = min(count, total_count)
+        
+        # Create list of (index, outcome) pairs
+        index_outcome_pairs = [
+            (i, self.metadata[i][EngramField.outcome]) 
+            for i in range(len(self.metadata))
+        ]
+        
+        # Sort by outcome (ascending) to get lowest scores first
+        index_outcome_pairs.sort(key=lambda x: x[1])
+        
+        # Get indices to delete (lowest scores)
+        indices_to_delete = [idx for idx, _ in index_outcome_pairs[:records_to_delete]]
+        indices_to_delete_set = set(indices_to_delete)
+        
+        # Rebuild index and all data structures excluding deleted records
+        # FAISS doesn't support deletion, so we rebuild the entire index
+        new_index = faiss.IndexFlatL2(STATE_VECTOR_SIZE)
+        new_vectors = []
+        new_metadata = []
+        new_insertion_indices = []
+        
+        for i in range(len(self.metadata)):
+            if i not in indices_to_delete_set:
+                new_vectors.append(self.vectors[i])
+                new_metadata.append(self.metadata[i])
+                new_insertion_indices.append(self.insertion_indices[i])
+        
+        # Rebuild FAISS index with remaining vectors
+        if len(new_vectors) > 0:
+            vectors_array = np.array(new_vectors, dtype=np.float32)
+            new_index.add(vectors_array)
+        
+        # Replace old structures with new ones
+        self.index = new_index
+        self.vectors = new_vectors
+        self.metadata = new_metadata
+        self.insertion_indices = new_insertion_indices
+        
+        # Invalidate cached count
+        self._cached_count = None
+        
+        return records_to_delete
+    
+    def delete_smallest_absolute_reward_records(self, count: int) -> int:
+        """Delete N records with the smallest absolute outcome values (closest to zero)."""
+        if count <= 0:
+            return 0
+        
+        total_count = self.get_count()
+        if total_count == 0:
+            return 0
+        
+        records_to_delete = min(count, total_count)
+        
+        # Create list of (index, abs(outcome)) pairs
+        index_abs_outcome_pairs = [
+            (i, abs(self.metadata[i][EngramField.outcome])) 
+            for i in range(len(self.metadata))
+        ]
+        
+        # Sort by absolute outcome (ascending) to get smallest absolute values first
+        index_abs_outcome_pairs.sort(key=lambda x: x[1])
+        
+        # Get indices to delete (smallest absolute outcomes)
+        indices_to_delete = [idx for idx, _ in index_abs_outcome_pairs[:records_to_delete]]
+        indices_to_delete_set = set(indices_to_delete)
+        
+        # Rebuild index and all data structures excluding deleted records
+        # FAISS doesn't support deletion, so we rebuild the entire index
+        new_index = faiss.IndexFlatL2(STATE_VECTOR_SIZE)
+        new_vectors = []
+        new_metadata = []
+        new_insertion_indices = []
+        
+        for i in range(len(self.metadata)):
+            if i not in indices_to_delete_set:
+                new_vectors.append(self.vectors[i])
+                new_metadata.append(self.metadata[i])
+                new_insertion_indices.append(self.insertion_indices[i])
+        
+        # Rebuild FAISS index with remaining vectors
+        if len(new_vectors) > 0:
+            vectors_array = np.array(new_vectors, dtype=np.float32)
+            new_index.add(vectors_array)
+        
+        # Replace old structures with new ones
+        self.index = new_index
+        self.vectors = new_vectors
+        self.metadata = new_metadata
+        self.insertion_indices = new_insertion_indices
+        
+        # Invalidate cached count
+        self._cached_count = None
+        
+        return records_to_delete
+    
     def delete_random_records(self, count: int) -> int:
         """Delete N randomly selected records."""
         if count <= 0:

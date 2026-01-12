@@ -5,7 +5,7 @@ from faiss_store import FAISSEngramStore
 import numpy
 from WeightedResonatorFactory import WeightedResonatorFactory
 import settings
-from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS, TRIALS_PER_EXPERIMENT, CREDIT_DISCOUNT_GAMMA
+from settings import DISPLAY, READ_ONLY, USE_HIT_POINTS, HIT_POINTS, MAX_TRIAL_LENGTH, METABOLIC_COST, SHOW_ACTION_OUTPUT, PANIC_ENABLED, PANIC_MAX_NOISE, VECTOR_COMPONENT_WEIGHTS, TRIALS_PER_EXPERIMENT, CREDIT_DISCOUNT_GAMMA, DEMO_AFTER_TRAINING
 from noise import calculate_base_noise
 import json
 from typing import Dict, List, Any
@@ -118,8 +118,66 @@ class Trainer:
         
         result = total_reward / trials
         print(f">>>>>>> Average reward: {result}")
+        
+        # Run demonstration trials with display enabled
+        if DEMO_AFTER_TRAINING:
+            self._run_demo_trials()
+        
         return result
 
+    def _run_demo_trials(self, num_demos: int = 500):
+        """
+        Run demonstration trials with visual rendering to show the trained agent.
+        """
+        print("\n" + "="*60)
+        print("DEMONSTRATION MODE - Showing trained agent")
+        print("="*60 + "\n")
+        
+        # Create a new environment with human rendering
+        demo_env = gym.make("LunarLander-v3", render_mode="human")
+        
+        for demo_num in range(num_demos):
+            observation, _ = demo_env.reset()
+            observation = normalise_observation(observation)
+            
+            total_reward = 0.0
+            step = 0
+            
+            while True:
+                # Get brain output (no noise/exploration - use high episode_progress)
+                brain_output, _ = self.brain.decide(
+                    observation, self.mean_success + 0.05,
+                    return_distance_info=True, panic_factor=0.0,
+                    episode_progress=1.0  # No exploration noise
+                )
+                
+                normalised = [x - min(brain_output) for x in brain_output]
+                action = numpy.argmax(normalised)
+                
+                raw_observation, reward, terminated, truncated, info = demo_env.step(action)
+                observation = normalise_observation(raw_observation)
+                total_reward += reward
+                step += 1
+                
+                if terminated or truncated or step >= MAX_TRIAL_LENGTH:
+                    break
+            
+            # Color the reward output
+            GREEN = '\033[92m'
+            RED = '\033[91m'
+            RESET = '\033[0m'
+            reward_str = f"{total_reward:.1f}"
+            if total_reward >= 200:
+                reward_str = f"{GREEN}{reward_str} ✓{RESET}"
+            elif total_reward < -100:
+                reward_str = f"{RED}{reward_str}{RESET}"
+            
+            print(f"Demo {demo_num + 1}/{num_demos} | Reward: {reward_str}")
+        
+        demo_env.close()
+        print("\n" + "="*60)
+        print("Demonstration complete")
+        print("="*60)
 
     def trial(self):
         # Run one trial

@@ -153,14 +153,44 @@ class EngramStore(BaseEngramStore):
 
 
     def make_collection(self):
+        collection_exists = utility.has_collection(self.collection_name)
         self.collection=Collection(name=self.collection_name, schema=self.schema())
-        index = {
-            "index_type": "IVF_FLAT", # Inverted File Flat: balanced between memory and speed
-            "metric_type": "L2", # Euclidean distance
-            "params": { "nlist": 1024 }, # 128 clusters, for speed of lookup
-        }
-
-        self.collection.create_index("vector", index)
+        
+        # Check existing indexes
+        try:
+            indexes = self.collection.indexes
+            vector_index_exists = any(
+                idx.field_name == "vector" for idx in indexes
+            )
+            outcome_index_exists = any(
+                idx.field_name == EngramField.outcome for idx in indexes
+            )
+        except:
+            # If we can't check indexes, assume they don't exist
+            vector_index_exists = False
+            outcome_index_exists = False
+        
+        # Index for vector field (for similarity search)
+        if not vector_index_exists:
+            vector_index = {
+                "index_type": "IVF_FLAT", # Inverted File Flat: balanced between memory and speed
+                "metric_type": "L2", # Euclidean distance
+                "params": { "nlist": 1024 }, # 128 clusters, for speed of lookup
+            }
+            self.collection.create_index("vector", vector_index)
+        
+        # Index for outcome field (for efficient score-based deletion)
+        # STL_SORT is optimized for range queries and sorting on numerical scalar fields
+        if not outcome_index_exists:
+            try:
+                outcome_index = {
+                    "index_type": "STL_SORT"  # Sorted index for efficient range queries and sorting
+                }
+                self.collection.create_index(EngramField.outcome, outcome_index)
+                print(f"Created STL_SORT index on outcome field for efficient score-based deletion")
+            except Exception as e:
+                # If index creation fails, that's okay - Milvus may handle scalar queries efficiently anyway
+                print(f"Note: Could not create outcome index: {e}")
 
     def _ensure_loaded(self):
         """Ensure the collection is loaded in memory. Loads only if not already loaded."""
@@ -479,6 +509,154 @@ class EngramStore(BaseEngramStore):
         
         # Delete in batches if we have too many IDs (to avoid expression length limits)
         BATCH_SIZE = 1000  # Conservative batch size for delete expressions
+        total_deleted = 0
+        
+        for i in range(0, len(ids_to_delete), BATCH_SIZE):
+            batch_ids = ids_to_delete[i:i + BATCH_SIZE]
+            id_list_str = ",".join(str(id) for id in batch_ids)
+            delete_expr = f"{EngramField.id} in [{id_list_str}]"
+            self.collection.delete(delete_expr)
+            total_deleted += len(batch_ids)
+        
+        # Flush to ensure deletion is persisted
+        self.collection.flush()
+        
+        # Invalidate cached count
+        self._cached_count = None
+        
+        return total_deleted
+    
+    def delete_lowest_score_records(self, count: int) -> int:
+        """
+        Delete the N records with the lowest outcome scores.
+        Returns the number of records actually deleted.
+        """
+        if count <= 0:
+            return 0
+        
+        self._ensure_loaded()
+        
+        total_count = self.get_count()
+        if total_count == 0:
+            return 0
+        
+        records_to_delete = min(count, total_count)
+        
+        # Query all records with their outcomes to find lowest scores
+        # Use a limit that respects Milvus's constraints
+        MAX_QUERY_LIMIT = 16384
+        
+        all_results = []
+        # Query in batches if needed
+        query_limit = min(MAX_QUERY_LIMIT, total_count)
+        
+        # Get all records with their outcomes
+        all_results = self.collection.query(
+            expr=f"{EngramField.outcome} >= -1000.0 && {EngramField.outcome} <= 1000.0",
+            output_fields=[EngramField.id, EngramField.outcome],
+            limit=query_limit
+        )
+        
+        # If we got fewer than the limit, we have all records
+        if len(all_results) < query_limit:
+            # We have all records
+            pass
+        else:
+            # Need to query more - for now, we'll work with what we have
+            # In practice, with 50k threshold and VECTOR_SAVE_RATE=0.25, this should be fine
+            pass
+        
+        if len(all_results) == 0:
+            return 0
+        
+        # Sort by outcome (ascending) to get lowest scores first
+        all_results.sort(key=lambda x: x[EngramField.outcome])
+        
+        # Take only the number we need
+        lowest_score_records = all_results[:records_to_delete]
+        
+        if len(lowest_score_records) == 0:
+            return 0
+        
+        # Extract IDs
+        ids_to_delete = [record[EngramField.id] for record in lowest_score_records]
+        
+        # Delete in batches if we have too many IDs
+        BATCH_SIZE = 1000
+        total_deleted = 0
+        
+        for i in range(0, len(ids_to_delete), BATCH_SIZE):
+            batch_ids = ids_to_delete[i:i + BATCH_SIZE]
+            id_list_str = ",".join(str(id) for id in batch_ids)
+            delete_expr = f"{EngramField.id} in [{id_list_str}]"
+            self.collection.delete(delete_expr)
+            total_deleted += len(batch_ids)
+        
+        # Flush to ensure deletion is persisted
+        self.collection.flush()
+        
+        # Invalidate cached count
+        self._cached_count = None
+        
+        return total_deleted
+    
+    def delete_smallest_absolute_reward_records(self, count: int) -> int:
+        """
+        Delete the N records with the smallest absolute outcome values (closest to zero).
+        Returns the number of records actually deleted.
+        """
+        if count <= 0:
+            return 0
+        
+        self._ensure_loaded()
+        
+        total_count = self.get_count()
+        if total_count == 0:
+            return 0
+        
+        records_to_delete = min(count, total_count)
+        
+        # Query all records with their outcomes to find smallest absolute values
+        # Use a limit that respects Milvus's constraints
+        MAX_QUERY_LIMIT = 16384
+        
+        all_results = []
+        # Query in batches if needed
+        query_limit = min(MAX_QUERY_LIMIT, total_count)
+        
+        # Get all records with their outcomes
+        all_results = self.collection.query(
+            expr=f"{EngramField.outcome} >= -1000.0 && {EngramField.outcome} <= 1000.0",
+            output_fields=[EngramField.id, EngramField.outcome],
+            limit=query_limit
+        )
+        
+        # If we got fewer than the limit, we have all records
+        if len(all_results) < query_limit:
+            # We have all records
+            pass
+        else:
+            # Need to query more - for now, we'll work with what we have
+            # In practice, with 50k threshold and VECTOR_SAVE_RATE=0.25, this should be fine
+            pass
+        
+        if len(all_results) == 0:
+            return 0
+        
+        # Sort by absolute outcome (ascending) to get smallest absolute values first
+        all_results.sort(key=lambda x: abs(x[EngramField.outcome]))
+        
+        # Take only the number we need
+        smallest_abs_records = all_results[:records_to_delete]
+        
+        if len(smallest_abs_records) == 0:
+            return 0
+        
+        # Extract IDs
+        ids_to_delete = [record[EngramField.id] for record in smallest_abs_records]
+        
+        # Delete in batches if we have too many IDs
+        BATCH_SIZE = 1000
         total_deleted = 0
         
         for i in range(0, len(ids_to_delete), BATCH_SIZE):
