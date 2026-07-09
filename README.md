@@ -6,6 +6,8 @@ This project is testing the idea that something like Sheldrakes "morphic resonan
 
 ## Overview
 
+ <img width="569" height="383" alt="screenshot" src="https://github.com/user-attachments/assets/a93016ca-af91-418e-89ab-1b82251ff51a" />
+
 Resonant Vectors explores a novel approach to reinforcement learning where:
 - **Engrams** (memory traces) store state-action-outcome triplets
 - **Vector similarity search** finds relevant past experiences
